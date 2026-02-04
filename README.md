@@ -45,7 +45,7 @@ This allows us to represent braids as “braid words.” For example, the braid 
   <br><br>
 </div>
 
-Braids can also be decomposed into bands. A band is an element of the form wσiw-1 where σi is a crossing and w is another braid in the braid group with the same number of strands. An upper bound on a braid’s minimal length band decomposition is the number of crossings in the braid, because each crossing is a trivial band.
+Braids can also be decomposed into bands. A band is an element of the form $\omega \sigma_i \omega^{-1}$ where $\sigma_i$ is a crossing and $\omega$ is another braid in the braid group with the same number of strands. An upper bound on a braid’s minimal length band decomposition is the number of crossings in the braid, because each crossing is a trivial band.
 
 ## Research Goal
 Finding a braid’s minimal length band decomposition can be challenging, since in some cases adding new crossings and twists to our braid can allow us to decompose it into shorter bands, even though the number of crossings has increased. I explore the possibility of training a deep reinforcement learning model to take as input a braid and output the shortest band decomposition it can find. This involves creating a custom RL environment, curriculum learning, and other techniques. 
