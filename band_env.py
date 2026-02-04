@@ -7,6 +7,7 @@ from generator import RandomBraid
 class BandEnv(gym.Env):
     def __init__(self, band_decomposition=[], braid_index=3, max_num_bands=16, timeout=200, train_type="random", difficulty=0):
         super(BandEnv, self).__init__()
+        self.max_band_len=13
 
         self.train_type = train_type
         if self.train_type == "random":
@@ -20,8 +21,8 @@ class BandEnv(gym.Env):
                 ### Short decomps, disabled creation moves, no slides, trivial cancelling pairs ###
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=4, max_braid_index=3, braid_length_stdev=1).word)
-                band2 = list(RandomBraid(max_braid_length=4, max_braid_index=3, braid_length_stdev=1).word)
+                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=1).word)
+                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=1).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -41,8 +42,8 @@ class BandEnv(gym.Env):
                 ### Medium decomps, no slides ###
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=8, max_braid_index=8, braid_length_stdev=24).word)
-                band2 = list(RandomBraid(max_braid_length=8, max_braid_index=8, braid_length_stdev=24).word)
+                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -62,8 +63,8 @@ class BandEnv(gym.Env):
                 # Random bands put together as a braid, hidden by one slide
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=8, max_braid_index=8, braid_length_stdev=24).word)
-                band2 = list(RandomBraid(max_braid_length=8, max_braid_index=8, braid_length_stdev=24).word)
+                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -84,8 +85,8 @@ class BandEnv(gym.Env):
                 # Hidden by more slides
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=8, max_braid_index=8, braid_length_stdev=24).word)
-                band2 = list(RandomBraid(max_braid_length=8, max_braid_index=8, braid_length_stdev=24).word)
+                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -117,7 +118,6 @@ class BandEnv(gym.Env):
         self.braid_index = braid_index # number of strands in the braid
         self.possible_crossings = np.concatenate((np.arange(-(self.braid_index - 1), 0), np.arange(1, self.braid_index)))
         self.max_num_bands=max_num_bands
-        self.max_band_len=13
         self.timeout = timeout
         self.max_num_actions = (self.max_num_bands-1)+(self.max_num_bands-1)+2*(self.max_num_bands+1)*(self.braid_index-1)+(self.max_num_bands-1)
         self.original_length = len(self.band_decomposition)

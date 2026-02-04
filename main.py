@@ -256,8 +256,8 @@ def ppo_main():
     max_actions = 150
 
     # Init environment
-    # env = gym.make('BandEnv-v0', band_decomposition=[1,2,-1]) # Learn to simplify a specific band
-    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, random=True) # Learn to simplify random bands
+    # env = gym.make('BandEnv-v0', band_decomposition=[1,2,-1], train_type="deterministic") # Learn to simplify a specific band
+    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random") # Learn to simplify random bands
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
 
@@ -336,6 +336,115 @@ def ppo_main():
     path = f"./models/{model_name}"
     torch.save(policy_network.state_dict(), path)
 
+def ppo_main_curriculum():
+    """Same as PPO main but adjusted for curriculum learning."""
+    # Hyper parameters
+    lr = 0.0008432777999828978
+    epochs = 500
+    env_samples = 10  # episodes per epoch
+    gamma = 0.9082237929205784 # discount factor
+    batch_size = 256
+    epsilon = 0.16273153856100495
+    policy_epochs = 5
+    # max_actions = 20 # now adjusting this per difficulty
+
+    # Curriculum stages
+    difficulties = [0, 1, 2, 3]
+
+    # Initialize environment to get sizes
+    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="curriculum", difficulty=difficulties[0])
+    action_size = env.unwrapped.max_num_actions
+    state_size = env.unwrapped.get_state().size
+
+    # Initialize networks and optimizer once (shared across difficulties)
+    policy_network = PolicyNetwork(state_size, action_size).to(device)
+    value_network = ValueNetwork(state_size).to(device)
+    optim = torch.optim.Adam(chain(policy_network.parameters(), value_network.parameters()), lr=lr)
+
+    # Logging 
+    results_ppo = []
+    policy_loss_ppo = []
+    value_loss_ppo = []
+    logs = []
+
+    loop = tqdm(total=epochs * len(difficulties), position=0, leave=False)
+
+    # Curriculum loop
+    for difficulty in difficulties:
+        print(f"Starting training on difficulty {difficulty}...")
+
+        # Reinitialize environment with current difficulty
+        env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="curriculum", difficulty=difficulty)
+        max_actions = 15 * (difficulty + 1)
+
+        # Start main loop for this difficulty
+        for epoch in range(epochs):
+
+            memory = []  # Reset memory every epoch
+            rewards = []  # Calculate average episodic reward per epoch
+
+            # Begin experience loop
+            for episode in range(env_samples):
+                # Reset environment
+                state = env.reset()
+                done = False
+                rollout = []
+                cum_reward = 0  # Track cumulative reward
+                num_actions_taken = 0
+
+                # Begin episode
+                while not done and num_actions_taken < max_actions:  # End after a given number of steps
+                    # Get action
+                    action, action_dist = get_action_ppo(policy_network, state)
+
+                    # Take step
+                    next_state, reward, terminated, truncated, info = env.step(action)
+                    done = terminated or truncated
+
+                    # Store step
+                    rollout.append((state, action, action_dist, reward))
+
+                    cum_reward += reward
+                    state = next_state  # Set current state
+
+                    # increase num_actions_taken
+                    num_actions_taken += 1
+
+                # Calculate returns and add episode to memory
+                memory = calculate_return(memory, rollout, gamma)
+                rewards.append(cum_reward)
+
+            # Train
+            dataset = RLDataset(memory)
+            loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+            mean_policy_loss_item, mean_value_loss_item = learn_ppo(
+                optim, policy_network, value_network, loader, epsilon, policy_epochs, action_size
+            )
+            policy_loss_ppo.append(mean_policy_loss_item)
+            value_loss_ppo.append(mean_value_loss_item)
+
+            # Print results
+            num_bands = len(env.unwrapped.band_decomposition)
+            results_ppo.extend(rewards)  # Store rewards for this epoch
+            logs.extend([env.unwrapped.log])
+            loop.update(1)
+            loop.set_description(
+                f"Difficulty: {difficulty} | Epochs: {epoch} | Reward: {results_ppo[-1]} | Num Bands: {num_bands}"
+            )
+
+            # Periodic save
+            if epoch > 0 and epoch % 1000 == 0:
+                # SAVE POLICY NETWORK FOR INFERENCE
+                model_name = "Braid_Simplificationator_2000"
+                path = f"./models/{model_name}"
+                torch.save(policy_network.state_dict(), path)
+
+    # Final save
+    # SAVE POLICY NETWORK FOR INFERENCE
+    model_name = "Braid_Simplificationator_2000"
+    path = f"./models/{model_name}"
+    torch.save(policy_network.state_dict(), path)
+
     return results_ppo, policy_loss_ppo, value_loss_ppo, logs
 
 
@@ -358,7 +467,7 @@ if __name__=="__main__":
 
     print("Training model...")
     # Run PPO Algorithm
-    results_ppo, policy_loss_ppo, value_loss_ppo, logs = ppo_main()
+    results_ppo, policy_loss_ppo, value_loss_ppo, logs = ppo_main_curriculum()
     print("Main training complete...")
     # Save logs
     with open('./logs/logs.json', 'w') as f:
@@ -379,7 +488,7 @@ if __name__=="__main__":
     braid_words = braid_df["Braid word"]
 
     # Initialize network for inference
-    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, random=True) # MAKE SURE THESE SIZES MATCH THE MODEL ABOVE
+    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random") # MAKE SURE THESE SIZES MATCH THE MODEL ABOVE
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
     model = PolicyNetwork(state_size, action_size).to(device)
