@@ -8,6 +8,10 @@ class BandEnv(gym.Env):
     def __init__(self, band_decomposition=[], braid_index=3, max_num_bands=16, timeout=200, train_type="random", difficulty=0):
         super(BandEnv, self).__init__()
         self.max_band_len=13
+        # Reserve four band slots for the two cancelling pairs, then split the remaining capacity between the two generated words
+        curriculum_word_limit = (max_num_bands - 4) // 2
+        if train_type == "curriculum" and curriculum_word_limit < 1:
+            raise ValueError("max_num_bands must be at least 6 for curriculum training")
 
         self.train_type = train_type
         if self.train_type == "random":
@@ -21,8 +25,8 @@ class BandEnv(gym.Env):
                 ### Short decomps, disabled creation moves, no slides, trivial cancelling pairs ###
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=1).word)
-                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=1).word)
+                band1 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=1).word)
+                band2 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=1).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -42,8 +46,8 @@ class BandEnv(gym.Env):
                 ### Medium decomps, no slides ###
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
-                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band1 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band2 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=24).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -63,8 +67,8 @@ class BandEnv(gym.Env):
                 # Random bands put together as a braid, hidden by one slide
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
-                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band1 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band2 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=24).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -85,8 +89,8 @@ class BandEnv(gym.Env):
                 # Hidden by more slides
 
                 # Make some simple random bands and put them together as a braid.
-                band1 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
-                band2 = list(RandomBraid(max_braid_length=max_num_bands, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band1 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=24).word)
+                band2 = list(RandomBraid(max_braid_length=curriculum_word_limit, max_braid_index=braid_index, braid_length_stdev=24).word)
                 band = band1 + band2
                 band_len = len(band)
                 # Add some cancelling things
@@ -138,7 +142,7 @@ class BandEnv(gym.Env):
         self.num_actions_taken = 0
         self.log = {"States": [self.original_band_decomposition], "Scores": [], "Moves": []}
 
-    def reset(self, seed=None, return_info = "", options = ""):
+    def reset(self, seed=None, options=None):
         """Reset the environment to its base state (the original band decomposition passed to the model)."""
         if seed is not None:
             np.random.seed(seed)
@@ -256,7 +260,7 @@ class BandEnv(gym.Env):
         self.mat_decomposition = self.bands_to_mat()
         self.log = {"States": [], "Scores": [], "Moves": []}
         observation = self.get_state().astype(np.float32)
-        return observation
+        return observation, {}
 
     def step(self, action):
         """Take an action, receive a reward, get a new state."""
@@ -275,8 +279,7 @@ class BandEnv(gym.Env):
         self.log["Moves"] += [self.action_type_full(action)]
         self.log["States"] += [self.band_decomposition.copy()]
         self.log["Scores"] += [reward]
-        # return self.get_state().astype(np.float32), reward, terminated, truncated, info
-        return self.get_state_ohe().astype(np.float32), reward, terminated, truncated, info
+        return self.get_state().astype(np.float32), reward, terminated, truncated, info
 
     def fix_list(self):
         '''Converts band decomposition into a list of lists, and converts each element of each list into an int'''

@@ -244,20 +244,19 @@ class ValueNetwork(nn.Module):
         """
         return self.net(x)
     
-def ppo_main():
+
+def ppo_main(epochs=5000, env_samples=10, max_actions=150,
+             save_path="./models/Braid_Simplificationator_2000"):
     # Hyper parameters
     lr = 0.0008432777999828978
-    epochs = 5000
-    env_samples = 10  # episodes per epoch
     gamma = 0.9082237929205784 # discount factor
     batch_size = 256
     epsilon = 0.16273153856100495
     policy_epochs = 5
-    max_actions = 150
 
     # Init environment
-    # env = gym.make('BandEnv-v0', band_decomposition=[1,2,-1], train_type="deterministic") # Learn to simplify a specific band
-    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random") # Learn to simplify random bands
+    # env = gym.make('BandEnv-v0', band_decomposition=[1,2,-1], train_type="deterministic") # Learn to simplify a specific braid
+    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random") # Learn to simplify random braids
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
 
@@ -282,7 +281,7 @@ def ppo_main():
         # Begin experience loop
         for episode in range(env_samples):
             # Reset environment
-            state = env.reset()
+            state, _ = env.reset()
             done = False
             rollout = []
             cum_reward = 0  # Track cumulative reward
@@ -325,23 +324,21 @@ def ppo_main():
         loop.update(1)
         loop.set_description("Epochs: {}   Reward: {}   Num Bands: {}  ".format(epoch, results_ppo[-1], num_bands))
 
-        if epoch > 0 and epoch % 1000 == 0:
-            # SAVE POLICY NETWORK FOR INFERENCE
-            model_name = "Braid_Simplificationator_2000"
-            path = f"./models/{model_name}"
-            torch.save(policy_network.state_dict(), path)
+        if save_path is not None and epoch > 0 and epoch % 1000 == 0:
+            torch.save(policy_network.state_dict(), save_path)
 
-    # SAVE POLICY NETWORK FOR INFERENCE
-    model_name = "Braid_Simplificationator_2000"
-    path = f"./models/{model_name}"
-    torch.save(policy_network.state_dict(), path)
+    if save_path is not None:
+        torch.save(policy_network.state_dict(), save_path)
+    env.close()
+    return results_ppo, policy_loss_ppo, value_loss_ppo, logs
 
-def ppo_main_curriculum():
+
+def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
+                        max_actions_per_stage=15,
+                        save_path="./models/Braid_Simplificationator_2000"):
     """Same as PPO main but adjusted for curriculum learning."""
     # Hyper parameters
     lr = 0.0008432777999828978
-    epochs = 500
-    env_samples = 10  # episodes per epoch
     gamma = 0.9082237929205784 # discount factor
     batch_size = 256
     epsilon = 0.16273153856100495
@@ -349,7 +346,6 @@ def ppo_main_curriculum():
     # max_actions = 20 # now adjusting this per difficulty
 
     # Curriculum stages
-    difficulties = [0, 1, 2, 3]
 
     # Initialize environment to get sizes
     env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="curriculum", difficulty=difficulties[0])
@@ -374,8 +370,9 @@ def ppo_main_curriculum():
         print(f"Starting training on difficulty {difficulty}...")
 
         # Reinitialize environment with current difficulty
+        env.close()
         env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="curriculum", difficulty=difficulty)
-        max_actions = 15 * (difficulty + 1)
+        max_actions = max_actions_per_stage * (difficulty + 1)
 
         # Start main loop for this difficulty
         for epoch in range(epochs):
@@ -386,7 +383,7 @@ def ppo_main_curriculum():
             # Begin experience loop
             for episode in range(env_samples):
                 # Reset environment
-                state = env.reset()
+                state, _ = env.reset()
                 done = False
                 rollout = []
                 cum_reward = 0  # Track cumulative reward
@@ -433,17 +430,13 @@ def ppo_main_curriculum():
             )
 
             # Periodic save
-            if epoch > 0 and epoch % 1000 == 0:
-                # SAVE POLICY NETWORK FOR INFERENCE
-                model_name = "Braid_Simplificationator_2000"
-                path = f"./models/{model_name}"
-                torch.save(policy_network.state_dict(), path)
+            if save_path is not None and epoch > 0 and epoch % 1000 == 0:
+                torch.save(policy_network.state_dict(), save_path)
 
     # Final save
-    # SAVE POLICY NETWORK FOR INFERENCE
-    model_name = "Braid_Simplificationator_2000"
-    path = f"./models/{model_name}"
-    torch.save(policy_network.state_dict(), path)
+    if save_path is not None:
+        torch.save(policy_network.state_dict(), save_path)
+    env.close()
 
     return results_ppo, policy_loss_ppo, value_loss_ppo, logs
 
@@ -519,8 +512,8 @@ if __name__=="__main__":
         initial_decomp_lens.append(len(initial_word))
 
         # Set up environment for this specific band decomposition
-        env = gym.make('BandEnv-v0', band_decomposition=initial_word, braid_index=8, max_num_bands=80)
-        state = env.reset()
+        env = gym.make('BandEnv-v0', band_decomposition=initial_word, braid_index=8, max_num_bands=80, train_type="deterministic")
+        state, _ = env.reset()
 
         # Write braid number to log file
         if i == 0:
@@ -590,4 +583,3 @@ if __name__=="__main__":
     plt.legend()
     plt.grid()
     plt.savefig("results/inference.png")
-        
