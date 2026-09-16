@@ -465,26 +465,27 @@ if __name__=="__main__":
     # print("Done testing")
     ####################################################################################
 
-    print("Training model...")
-    # Run PPO Algorithm
-    results_ppo, policy_loss_ppo, value_loss_ppo, logs = ppo_main_curriculum()
-    print("Main training complete...")
-    # Save logs
-    with open('./logs/logs.json', 'w') as f:
-        json.dump(logs, f)
+    ### Training ###
+    # print("Training model...")
+    # # Run PPO Algorithm
+    # results_ppo, policy_loss_ppo, value_loss_ppo, logs = ppo_main_curriculum()
+    # print("Main training complete...")
+    # # Save logs
+    # with open('./logs/logs.json', 'w') as f:
+    #     json.dump(logs, f)
 
-    # Plot training rewards
-    plt.figure()
-    plt.plot(results_ppo)
-    plt.title("Number of Bands Removed at each Training Episode")
-    plt.ylabel("Return")
-    plt.xlabel("Episode")
-    plt.savefig("results/training.png")
+    # # Plot training rewards
+    # plt.figure()
+    # plt.plot(results_ppo)
+    # plt.title("Number of Bands Removed at each Training Episode")
+    # plt.ylabel("Return")
+    # plt.xlabel("Episode")
+    # plt.savefig("results/training.png")
 
     ### Inference ###
     braid_df = pd.read_csv("./data/braids_with_ranks.csv")
     # Isolate braid ranks and decompositions
-    optimal_ranks = braid_df["Braid ranks"].values
+    true_ranks = braid_df["Braid ranks"].values
     braid_words = braid_df["Braid word"]
 
     # Initialize network for inference
@@ -501,33 +502,33 @@ if __name__=="__main__":
 
     # Train on each braid
     print("Inference...")
-    final_ranks = [] # Ranks of bands after terminating episode
-    best_ranks = [] # Best rank achieved during episode
+    final_decomp_lens = [] # Length of band decompositions after terminating episode
+    best_decomp_lens = [] # Shortest band decomposition lengths achieved during episode
     simplest_forms = [] # Store best simplifications
-    initial_ranks = []
+    initial_decomp_lens = []
     rewards = []
     # Loop over all braids
-    for i in range(len(optimal_ranks)):
-        best_rank = None # Best rank achieved
+    for i in range(len(true_ranks)):
+        best_decomp_len = None # Best rank achieved
         simplest_form = None
 
         # Testing info
-        true_rank = int(optimal_ranks[i])
+        true_rank = int(true_ranks[i])
         # Extract initial braid word with correct formatting
         initial_word = [int(sigma) for sigma in braid_words.iloc[i][1:-1].split(", ")]
-        initial_ranks.append(len(initial_word))
+        initial_decomp_lens.append(len(initial_word))
 
         # Set up environment for this specific band decomposition
         env = gym.make('BandEnv-v0', band_decomposition=initial_word, braid_index=8, max_num_bands=80)
         state = env.reset()
 
-        # Write braid index to log file
+        # Write braid number to log file
         if i == 0:
-            with open('./logs/logfile.txt', 'w') as f:
-                    f.write("\nBand 0\n")
+            with open('./logs/inference_logfile.txt', 'w') as f:
+                    f.write("\nBraid 0\n")
         else:
-            with open('./logs/logfile.txt', 'a') as f:
-                    f.write(f"\nBand {i}\n")
+            with open('./logs/inference_logfile.txt', 'a') as f:
+                    f.write(f"\nBraid {i}\n")
 
         with torch.no_grad():
             num_actions_taken = 0
@@ -536,7 +537,7 @@ if __name__=="__main__":
             # Begin episode
             while not done and num_actions_taken < 150:  # End after a given number of steps
                 # Write state to log file
-                with open('./logs/logfile.txt', 'a') as f:
+                with open('./logs/inference_logfile.txt', 'a') as f:
                     f.write(str(env.unwrapped.band_decomposition) + "\n")
 
                 # Get action
@@ -552,43 +553,40 @@ if __name__=="__main__":
                 # Increase num_actions_taken
                 num_actions_taken += 1
 
-                # Check if the rank is the best yet
-                current_rank = len(env.unwrapped.band_decomposition)
-                if best_rank is None:
-                    best_rank = current_rank
-                    simplest_form = env.unwrapped.band_decomposition
-                elif best_rank > current_rank:
-                    best_rank = current_rank
-                    simplest_form = env.unwrapped.band_decomposition
+                # Check if the decomposition length is the best yet
+                current_decomp_len = len(env.unwrapped.band_decomposition)
+                if best_decomp_len is None or current_decomp_len <= best_decomp_len:
+                    best_decomp_len = current_decomp_len
+                    simplest_form = list(env.unwrapped.band_decomposition)
 
         rewards.append(cum_reward)
-        best_ranks.append(best_rank)
+        best_decomp_lens.append(best_decomp_len)
         simplest_forms.append(simplest_form)
-        final_ranks.append(len(env.unwrapped.band_decomposition))
+        final_decomp_lens.append(len(env.unwrapped.band_decomposition))
 
     # Find number completely simplified
     correct = 0
-    for i in range(len(optimal_ranks)):
-        if optimal_ranks[i] == final_ranks[i]:
+    for i in range(len(true_ranks)):
+        if true_ranks[i] == best_decomp_lens[i]:
             correct += 1
     print("Number completely simplified:", correct)
 
     # Save simplifications
-    with open("./logs/inference_simplifications.txt", "w") as f:
+    with open("./logs/inference_final_forms.txt", "w") as f:
         for item in simplest_forms:
             f.write(f"{item}\n")
 
     # Plot level of simplification
-    comparison = sorted(list(zip(optimal_ranks, initial_ranks, best_ranks)), reverse=True)
+    comparison = sorted(list(zip(true_ranks, initial_decomp_lens, best_decomp_lens)), reverse=True)
     sorted_optimal, sorted_initial, sorted_best = zip(*comparison)
 
     fig = plt.figure(figsize=(13,4))
     x_vals = np.arange(1, 101)
-    plt.scatter(x_vals, sorted_optimal, label="Optimal Rank")
-    plt.scatter(x_vals, sorted_initial, color="green", label="Initial Rank")
-    plt.scatter(x_vals, sorted_best, marker="+", label="Rank Achieved")
-    plt.ylabel("Rank")
-    plt.xlabel("Test Braid Index")
+    plt.scatter(x_vals, sorted_optimal, label="True Rank")
+    plt.scatter(x_vals, sorted_initial, color="green", label="Initial Band Decomp Length")
+    plt.scatter(x_vals, sorted_best, marker="+", label="Best Band Decomp Length Achieved")
+    plt.ylabel("Band Decomposition Length")
+    plt.xlabel("Test Braid Identifier")
     plt.legend()
     plt.grid()
     plt.savefig("results/inference.png")

@@ -339,7 +339,7 @@ class BandEnv(gym.Env):
         for jjj in range(len(self.band_decomposition)):
             self.mat=np.identity(self.matrix_size)
             for iii in self.mat_decomposition[jjj]:
-                self.mat=self.mat@self.matrices[iii]
+                self.mat=self.mat@self.matrices[iii] # This is the LK-rep part
             self.mat_decomposition[jjj]=self.mat
         return self.mat_decomposition
 
