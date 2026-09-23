@@ -12,6 +12,7 @@ import random
 import numpy as np
 import pandas as pd
 import copy
+from pathlib import Path
 from IPython.core.interactiveshell import InteractiveShell
 from generator import RandomBraid
 from band_env import BandEnv
@@ -441,140 +442,232 @@ def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
     return results_ppo, policy_loss_ppo, value_loss_ppo, logs
 
 
+def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
+                     env_samples=10, max_actions=150, max_num_bands=80,
+                     save_path="./models/Braid_Simplificationator_specific",
+                     report_path="./logs/specific_training_report.json"):
+    """Train PPO from scratch on one fixed braid and retain the best path found."""
+    if band_decomposition is None:
+        raise ValueError("band_decomposition must be set for specific-braid training")
+    if len(band_decomposition) > max_num_bands:
+        raise ValueError("max_num_bands cannot be smaller than the starting decomposition")
 
-if __name__=="__main__":
-    ### TEST ENVIRONMENT & PACKAGES ####################################################
-    # my_braid = RandomBraid(braid_length_stdev=10)
-    # # my_braid = RandomBraid(max_braid_index=8, max_braid_length=80, braid_length_stdev=24)
-    # print(my_braid.word)
+    lr = 0.0008432777999828978
+    gamma = 0.9082237929205784
+    batch_size = 256
+    epsilon = 0.16273153856100495
+    policy_epochs = 5
 
-    # # Example of how to get action and state space sizes when updating the band decomp passed to PPO
-    # my_env = BandEnv(braid_index=8, max_num_bands=80, random=True)
+    env = gym.make(
+        'BandEnv-v0',
+        band_decomposition=band_decomposition,
+        braid_index=braid_index,
+        max_num_bands=max_num_bands,
+        train_type="deterministic",
+    )
+    action_size = env.unwrapped.max_num_actions
+    state_size = env.unwrapped.get_state().size
 
-    # action_size = my_env.max_num_actions
+    policy_network = PolicyNetwork(state_size, action_size).to(device)
+    value_network = ValueNetwork(state_size).to(device)
+    optim = torch.optim.Adam(
+        chain(policy_network.parameters(), value_network.parameters()), lr=lr
+    )
 
-    # print("Action space size: ", action_size)
-    # print("State space size: ", my_env.get_state().size)
-    # print("Done testing")
-    ####################################################################################
+    original_decomposition = copy.deepcopy(env.unwrapped.original_band_decomposition)
+    best_decomposition = copy.deepcopy(original_decomposition)
+    best_decomp_len = len(best_decomposition)
+    best_action_sequence = []
+    best_move_sequence = []
+    best_location = None
 
-    ### Training ###
-    # print("Training model...")
-    # # Run PPO Algorithm
-    # results_ppo, policy_loss_ppo, value_loss_ppo, logs = ppo_main_curriculum()
-    # print("Main training complete...")
-    # # Save logs
-    # with open('./logs/logs.json', 'w') as f:
-    #     json.dump(logs, f)
+    results_ppo = []
+    policy_loss_ppo = []
+    value_loss_ppo = []
+    best_length_history = []
+    logs = []
 
-    # # Plot training rewards
-    # plt.figure()
-    # plt.plot(results_ppo)
-    # plt.title("Number of Bands Removed at each Training Episode")
-    # plt.ylabel("Return")
-    # plt.xlabel("Episode")
-    # plt.savefig("results/training.png")
+    if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    if report_path is not None:
+        Path(report_path).parent.mkdir(parents=True, exist_ok=True)
 
-    ### Inference ###
-    braid_df = pd.read_csv("./data/braids_with_ranks.csv")
-    # Isolate braid ranks and decompositions
+    loop = tqdm(total=epochs, position=0, leave=False)
+    for epoch in range(epochs):
+        memory = []
+        rewards = []
+
+        for episode in range(env_samples):
+            state, _ = env.reset()
+            done = False
+            rollout = []
+            episode_actions = []
+            cum_reward = 0
+            num_actions_taken = 0
+
+            while not done and num_actions_taken < max_actions:
+                action, action_dist = get_action_ppo(policy_network, state)
+                next_state, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+
+                rollout.append((state, action, action_dist, reward))
+                episode_actions.append(action)
+                cum_reward += reward
+                state = next_state
+                num_actions_taken += 1
+
+                current_decomp_len = len(env.unwrapped.band_decomposition)
+                if current_decomp_len < best_decomp_len:
+                    best_decomp_len = current_decomp_len
+                    best_decomposition = copy.deepcopy(env.unwrapped.band_decomposition)
+                    best_action_sequence = episode_actions.copy()
+                    best_move_sequence = env.unwrapped.log["Moves"].copy()
+                    best_location = {
+                        "epoch": epoch,
+                        "episode": episode,
+                        "step": num_actions_taken,
+                    }
+
+            memory = calculate_return(memory, rollout, gamma)
+            rewards.append(cum_reward)
+            best_length_history.append(best_decomp_len)
+
+        dataset = RLDataset(memory)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        mean_policy_loss_item, mean_value_loss_item = learn_ppo(
+            optim, policy_network, value_network, loader, epsilon,
+            policy_epochs, action_size
+        )
+        policy_loss_ppo.append(mean_policy_loss_item)
+        value_loss_ppo.append(mean_value_loss_item)
+
+        results_ppo.extend(rewards)
+        logs.append(copy.deepcopy(env.unwrapped.log))
+        loop.update(1)
+        loop.set_description(
+            f"Epoch: {epoch} | Reward: {results_ppo[-1]} | Best length: {best_decomp_len}"
+        )
+
+        if save_path is not None and epoch > 0 and epoch % 1000 == 0:
+            torch.save(policy_network.state_dict(), save_path)
+
+    loop.close()
+    if save_path is not None:
+        torch.save(policy_network.state_dict(), save_path)
+
+    report = {
+        "initial_length": len(original_decomposition),
+        "initial_decomposition": original_decomposition,
+        "best_length": best_decomp_len,
+        "best_decomposition": best_decomposition,
+        "best_action_sequence": best_action_sequence,
+        "best_move_sequence": best_move_sequence,
+        "best_found_at": best_location,
+        "best_length_history": best_length_history,
+    }
+    if report_path is not None:
+        with open(report_path, 'w') as f:
+            json.dump(report, f, indent=2)
+
+    env.close()
+    print(f"Initial decomposition length: {report['initial_length']}")
+    print(f"Best decomposition length: {report['best_length']}")
+    print(f"Best decomposition: {report['best_decomposition']}")
+
+    return results_ppo, policy_loss_ppo, value_loss_ppo, logs, report
+
+
+def run_inference(model_path="./models/Braid_Simplificationator_2000",
+                  data_path="./data/braids_with_ranks.csv",
+                  log_path="./logs/inference_logfile.txt",
+                  forms_path="./logs/inference_final_forms.txt",
+                  plot_path="./results/inference.png"):
+    """Evaluate a saved policy on all braids in the inference dataset."""
+    braid_df = pd.read_csv(data_path)
     true_ranks = braid_df["Braid ranks"].values
     braid_words = braid_df["Braid word"]
 
-    # Initialize network for inference
-    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random") # MAKE SURE THESE SIZES MATCH THE MODEL ABOVE
-    action_size = env.unwrapped.max_num_actions
-    state_size = env.unwrapped.get_state().size
+    size_env = gym.make(
+        'BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random"
+    )
+    action_size = size_env.unwrapped.max_num_actions
+    state_size = size_env.unwrapped.get_state().size
+    size_env.close()
+
     model = PolicyNetwork(state_size, action_size).to(device)
-    # Load saved parameters
-    model_name = "Braid_Simplificationator_2000"
-    path = f"./models/{model_name}"
-    model.load_state_dict(torch.load(path))
-    # Set to eval mode instead of train
+    model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    # Train on each braid
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(forms_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
+
     print("Inference...")
-    final_decomp_lens = [] # Length of band decompositions after terminating episode
-    best_decomp_lens = [] # Shortest band decomposition lengths achieved during episode
-    simplest_forms = [] # Store best simplifications
+    final_decomp_lens = []
+    best_decomp_lens = []
+    simplest_forms = []
     initial_decomp_lens = []
     rewards = []
-    # Loop over all braids
-    for i in range(len(true_ranks)):
-        best_decomp_len = None # Best rank achieved
-        simplest_form = None
 
-        # Testing info
-        true_rank = int(true_ranks[i])
-        # Extract initial braid word with correct formatting
+    for i in range(len(true_ranks)):
         initial_word = [int(sigma) for sigma in braid_words.iloc[i][1:-1].split(", ")]
         initial_decomp_lens.append(len(initial_word))
 
-        # Set up environment for this specific band decomposition
-        env = gym.make('BandEnv-v0', band_decomposition=initial_word, braid_index=8, max_num_bands=80, train_type="deterministic")
+        env = gym.make(
+            'BandEnv-v0', band_decomposition=initial_word, braid_index=8,
+            max_num_bands=80, train_type="deterministic"
+        )
         state, _ = env.reset()
+        best_decomp_len = len(env.unwrapped.band_decomposition)
+        simplest_form = copy.deepcopy(env.unwrapped.band_decomposition)
 
-        # Write braid number to log file
-        if i == 0:
-            with open('./logs/inference_logfile.txt', 'w') as f:
-                    f.write("\nBraid 0\n")
-        else:
-            with open('./logs/inference_logfile.txt', 'a') as f:
-                    f.write(f"\nBraid {i}\n")
+        file_mode = 'w' if i == 0 else 'a'
+        with open(log_path, file_mode) as f:
+            f.write(f"\nBraid {i}\n")
 
         with torch.no_grad():
             num_actions_taken = 0
             done = False
-            cum_reward = 0  # Track cumulative reward
-            # Begin episode
-            while not done and num_actions_taken < 150:  # End after a given number of steps
-                # Write state to log file
-                with open('./logs/inference_logfile.txt', 'a') as f:
+            cum_reward = 0
+            while not done and num_actions_taken < 150:
+                with open(log_path, 'a') as f:
                     f.write(str(env.unwrapped.band_decomposition) + "\n")
 
-                # Get action
                 action, action_dist = get_action_ppo(model, state)
-
-                # Take step
                 next_state, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
-
                 cum_reward += reward
-                state = next_state  # Set current state
-
-                # Increase num_actions_taken
+                state = next_state
                 num_actions_taken += 1
 
-                # Check if the decomposition length is the best yet
                 current_decomp_len = len(env.unwrapped.band_decomposition)
-                if best_decomp_len is None or current_decomp_len <= best_decomp_len:
+                if current_decomp_len <= best_decomp_len:
                     best_decomp_len = current_decomp_len
-                    simplest_form = list(env.unwrapped.band_decomposition)
+                    simplest_form = copy.deepcopy(env.unwrapped.band_decomposition)
 
         rewards.append(cum_reward)
         best_decomp_lens.append(best_decomp_len)
         simplest_forms.append(simplest_form)
         final_decomp_lens.append(len(env.unwrapped.band_decomposition))
+        env.close()
 
-    # Find number completely simplified
-    correct = 0
-    for i in range(len(true_ranks)):
-        if true_ranks[i] == best_decomp_lens[i]:
-            correct += 1
+    correct = sum(
+        true_rank == best_length
+        for true_rank, best_length in zip(true_ranks, best_decomp_lens)
+    )
     print("Number completely simplified:", correct)
 
-    # Save simplifications
-    with open("./logs/inference_final_forms.txt", "w") as f:
+    with open(forms_path, 'w') as f:
         for item in simplest_forms:
             f.write(f"{item}\n")
 
-    # Plot level of simplification
-    comparison = sorted(list(zip(true_ranks, initial_decomp_lens, best_decomp_lens)), reverse=True)
+    comparison = sorted(
+        zip(true_ranks, initial_decomp_lens, best_decomp_lens), reverse=True
+    )
     sorted_optimal, sorted_initial, sorted_best = zip(*comparison)
 
-    fig = plt.figure(figsize=(13,4))
-    x_vals = np.arange(1, 101)
+    plt.figure(figsize=(13, 4))
+    x_vals = np.arange(1, len(comparison) + 1)
     plt.scatter(x_vals, sorted_optimal, label="True Rank")
     plt.scatter(x_vals, sorted_initial, color="green", label="Initial Band Decomp Length")
     plt.scatter(x_vals, sorted_best, marker="+", label="Best Band Decomp Length Achieved")
@@ -582,4 +675,93 @@ if __name__=="__main__":
     plt.xlabel("Test Braid Identifier")
     plt.legend()
     plt.grid()
-    plt.savefig("results/inference.png")
+    plt.savefig(plot_path)
+    plt.close()
+
+    return {
+        "true_ranks": list(true_ranks),
+        "initial_lengths": initial_decomp_lens,
+        "best_lengths": best_decomp_lens,
+        "final_lengths": final_decomp_lens,
+        "simplest_forms": simplest_forms,
+        "rewards": rewards,
+    }
+
+
+
+if __name__=="__main__":
+    RUN_MODE = "specific_training"  # "training", "inference", or "specific_training"
+    TRAINING_METHOD = "curriculum"  # "regular" or "curriculum" (when RUN_MODE=="training")
+
+    # Settings used only when RUN_MODE == "specific_training".
+    SPECIFIC_BRAID = [3, -3, 2, -3, 2, 1, 1, -2, 1, -2] 
+    SPECIFIC_BRAID_INDEX = 4
+    SPECIFIC_MAX_NUM_BANDS = 40
+    SPECIFIC_EPOCHS = 2
+    SPECIFIC_ENV_SAMPLES = 10
+    SPECIFIC_MAX_ACTIONS = 150
+    SPECIFIC_MODEL_PATH = "./models/Braid_Simplificationator_specific"
+    SPECIFIC_REPORT_PATH = "./logs/specific_training_report.json"
+    SPECIFIC_PLOT_PATH = "./results/specific_training.png"
+
+    if RUN_MODE == "training":
+        print(f"Training model with the {TRAINING_METHOD} method...")
+        if TRAINING_METHOD == "regular":
+            results_ppo, policy_loss_ppo, value_loss_ppo, logs = ppo_main()
+        elif TRAINING_METHOD == "curriculum":
+            results_ppo, policy_loss_ppo, value_loss_ppo, logs = ppo_main_curriculum()
+        else:
+            raise ValueError("TRAINING_METHOD must be 'regular' or 'curriculum'")
+
+        with open('./logs/logs.json', 'w') as f:
+            json.dump(logs, f)
+
+        plt.figure()
+        plt.plot(results_ppo)
+        plt.title("Number of Bands Removed at each Training Episode")
+        plt.ylabel("Return")
+        plt.xlabel("Episode")
+        plt.savefig("./results/training.png")
+        plt.close()
+        print("Training complete.")
+
+    elif RUN_MODE == "inference":
+        run_inference()
+
+    elif RUN_MODE == "specific_training":
+        if SPECIFIC_BRAID is None:
+            raise ValueError(
+                "Set SPECIFIC_BRAID before running specific-braid training"
+            )
+
+        results_ppo, policy_loss_ppo, value_loss_ppo, logs, report = ppo_single_braid(
+            band_decomposition=SPECIFIC_BRAID,
+            braid_index=SPECIFIC_BRAID_INDEX,
+            epochs=SPECIFIC_EPOCHS,
+            env_samples=SPECIFIC_ENV_SAMPLES,
+            max_actions=SPECIFIC_MAX_ACTIONS,
+            max_num_bands=SPECIFIC_MAX_NUM_BANDS,
+            save_path=SPECIFIC_MODEL_PATH,
+            report_path=SPECIFIC_REPORT_PATH,
+        )
+
+        Path(SPECIFIC_PLOT_PATH).parent.mkdir(parents=True, exist_ok=True)
+        plt.figure(figsize=(10, 7))
+        plt.subplot(2, 1, 1)
+        plt.plot(results_ppo)
+        plt.ylabel("Return")
+        plt.title("Specific-braid training")
+        plt.grid()
+        plt.subplot(2, 1, 2)
+        plt.plot(report["best_length_history"])
+        plt.ylabel("Best length found")
+        plt.xlabel("Episode")
+        plt.grid()
+        plt.tight_layout()
+        plt.savefig(SPECIFIC_PLOT_PATH)
+        plt.close()
+
+    else:
+        raise ValueError(
+            "RUN_MODE must be 'training', 'inference', or 'specific_training'"
+        )
