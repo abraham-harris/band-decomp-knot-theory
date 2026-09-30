@@ -1,0 +1,18 @@
+{
+  "name": "regular",
+  "mode": "training",
+  "training_method": "regular",
+  "seed": null,
+  "epochs": 5000,
+  "env_samples": 10,
+  "max_actions": 150,
+  "braid_index": 8,
+  "max_num_bands": 80,
+  "learning_rate": 0.0008432777999828978,
+  "gamma": 0.9082237929205784,
+  "batch_size": 256,
+  "epsilon": 0.16273153856100495,
+  "policy_epochs": 5,
+  "save_model": true,
+  "model_name": "Braid_Simplificationator_2000"
+}

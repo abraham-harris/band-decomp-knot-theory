@@ -1,0 +1,18 @@
+{
+  "name": "specific_braid",
+  "mode": "specific_training",
+  "seed": null,
+  "band_decomposition": [3, -3, 2, -3, 2, 1, 1, -2, 1, -2],
+  "braid_index": 5,
+  "max_num_bands": 40,
+  "epochs": 500,
+  "env_samples": 10,
+  "max_actions": 150,
+  "learning_rate": 0.0008432777999828978,
+  "gamma": 0.9082237929205784,
+  "batch_size": 256,
+  "epsilon": 0.16273153856100495,
+  "policy_epochs": 5,
+  "save_model": true,
+  "model_name": "Braid_Simplificationator_specific"
+}

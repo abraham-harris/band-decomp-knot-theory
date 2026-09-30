@@ -1,0 +1,10 @@
+{
+  "name": "inference",
+  "mode": "inference",
+  "seed": null,
+  "model_path": "./models/Braid_Simplificationator_2000",
+  "data_path": "./data/braids_with_ranks.csv",
+  "braid_index": 8,
+  "max_num_bands": 80,
+  "max_actions": 150
+}
