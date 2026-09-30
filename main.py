@@ -447,8 +447,14 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
                      report_path="./logs/specific_training_report.json", *,
                      learning_rate=0.0008432777999828978,
                      gamma=0.9082237929205784, batch_size=256,
-                     epsilon=0.16273153856100495, policy_epochs=5):
-    """Train PPO from scratch on one fixed braid and retain the best path found."""
+                     epsilon=0.16273153856100495, policy_epochs=5,
+                     collect_logs=True, show_progress=True):
+    """Train PPO from scratch on one fixed braid and retain the best path found.
+
+    Set collect_logs=False to skip retaining epoch environment logs, and
+    show_progress=False for quiet batch training. Neither changes the best-path
+    tracking or the returned report.
+    """
     if band_decomposition is None:
         raise ValueError("band_decomposition must be set for specific-braid training")
     if len(band_decomposition) > max_num_bands:
@@ -489,7 +495,7 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
     if report_path is not None:
         Path(report_path).parent.mkdir(parents=True, exist_ok=True)
 
-    loop = tqdm(total=epochs, position=0, leave=False)
+    loop = tqdm(total=epochs, position=0, leave=False, disable=not show_progress)
     for epoch in range(epochs):
         memory = []
         rewards = []
@@ -539,7 +545,8 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
         value_loss_ppo.append(mean_value_loss_item)
 
         results_ppo.extend(rewards)
-        logs.append(copy.deepcopy(env.unwrapped.log))
+        if collect_logs:
+            logs.append(copy.deepcopy(env.unwrapped.log))
         loop.update(1)
         loop.set_description(
             f"Epoch: {epoch} | Reward: {results_ppo[-1]} | Best length: {best_decomp_len}"
@@ -567,9 +574,10 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
             json.dump(report, f, indent=2)
 
     env.close()
-    print(f"Initial decomposition length: {report['initial_length']}")
-    print(f"Best decomposition length: {report['best_length']}")
-    print(f"Best decomposition: {report['best_decomposition']}")
+    if show_progress:
+        print(f"Initial decomposition length: {report['initial_length']}")
+        print(f"Best decomposition length: {report['best_length']}")
+        print(f"Best decomposition: {report['best_decomposition']}")
 
     return results_ppo, policy_loss_ppo, value_loss_ppo, logs, report
 

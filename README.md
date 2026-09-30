@@ -125,6 +125,64 @@ The supplied configs use `"seed": null`, preserving the current unseeded behavio
 An integer from `0` through `4294967295` seeds Python's `random`, NumPy, and PyTorch
 before the experiment starts. The resolved seed is saved in `config.json`.
 
+### Training separately on every dataset braid
+
+The batch runner calls the existing specific-braid PPO trainer for **every CSV
+row**, creating a fresh policy and optimizer for each braid. It uses each row's
+`Braid index` as its strand count and tracks the shortest decomposition encountered
+at **any step** across all that braid's training episodes, including its starting
+decomposition. This is the best length found within the training budget, not a
+proof of minimality. Known ranks are used for comparison, not as a stopping rule.
+
+```bash
+../.knotenv/bin/python batch_training.py --config configs/batch_braids.json
+```
+
+Edit `configs/batch_braids.json` to set the training budget and PPO parameters.
+The supplied configuration uses 500 epochs per braid, 10 episodes per epoch,
+at most 150 actions per episode, and a capacity of 80 bands. The current dataset
+contains 100 braids, with starting word lengths up to 59. The full run therefore
+has a budget of 500,000 episodes. Reduce these settings for an initial trial.
+`--name` and `--runs-root` can customize the run name and parent directory.
+
+The runner prints its unique run directory. It contains `config.json`,
+`run_info.json`, a `dataset.csv` snapshot, one `results.csv`, and a single aggregate
+`plot.png` after completion. No per-braid models, images, training histories, or
+environment logs are saved. The single-braid trainer also skips accumulating its
+epoch environment logs in memory for this mode.
+
+Each result has a zero-based `braid_id` identifying the original CSV row,
+`braid_index`, `true_rank`, `initial_length`, `best_length`, `rank_gap`
+(`best_length - true_rank`), seed, completed epoch/episode counts, elapsed seconds,
+and JSON-encoded best decomposition, action sequence, and discovery location.
+For example, pandas can read it with `pd.read_csv("runs/.../results.csv")`;
+use `json.loads` to decode the decomposition or action sequence if needed.
+
+After **each completed braid**, the results CSV is flushed to disk and atomically
+replaced before training starts on the next braid. Completed rows survive Ctrl+C,
+job termination, or a later braid's failure. The braid currently training is
+restarted from scratch when resuming; its partial progress is not saved.
+
+```bash
+../.knotenv/bin/python batch_training.py --resume runs/<run_directory>
+../.knotenv/bin/python batch_training.py --plot-only runs/<run_directory>
+```
+
+Resume uses the saved configuration and dataset snapshot, skips completed IDs,
+and writes into that same run directory. Run only one process per run directory.
+For a configured seed, braid `i` uses `(seed + i) % 2**32`, so restarting does not
+depend on how many preceding braids have already finished; `null` leaves training
+unseeded. Exact reproducibility also depends on hardware and library versions.
+Ctrl+C and SIGTERM mark the run as `interrupted`; an uncatchable kill may leave
+`run_info.json` marked `running`, but the saved CSV can still be resumed.
+
+The plot command works on any nonempty set of completed results, even before the
+experiment finishes. It compares known rank, initial length, and best achieved
+length in the same descending order as the inference plot. Partial plots include
+completed braids only. To transfer or resume on the supercomputer, copy the code
+and config, and copy the entire run directory when resuming. Use that machine's
+Python environment; the local `../.knotenv/bin/python` path is for WSL.
+
 ### Selecting a model for inference
 
 Set `model_path` in an inference config to the saved model you want to evaluate,

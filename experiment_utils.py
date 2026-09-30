@@ -7,8 +7,10 @@ functions are called.
 
 import csv
 import json
+import os
 import re
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -101,9 +103,11 @@ def update_run_status(run_directory, status, error=None):
         run_info = json.load(run_info_file)
 
     run_info["status"] = status
-    run_info["finished_at"] = datetime.now(timezone.utc).isoformat()
+    run_info["finished_at"] = None if status == "running" else datetime.now(timezone.utc).isoformat()
     if error is not None:
         run_info["error"] = str(error)
+    else:
+        run_info.pop("error", None)
 
     _write_json(run_info_path, run_info)
 
@@ -131,8 +135,20 @@ def save_metrics(rows, metrics_path):
 
 
 def _write_json(path, value):
-    """Write a JSON file using consistent formatting."""
+    """Replace run metadata atomically so an interrupted update remains readable."""
     path = Path(path)
-    with path.open("w", encoding="utf-8") as json_file:
-        json.dump(value, json_file, indent=2)
-        json_file.write("\n")
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}_", suffix=".tmp", delete=False,
+        ) as json_file:
+            temporary_path = Path(json_file.name)
+            json.dump(value, json_file, indent=2)
+            json_file.write("\n")
+            json_file.flush()
+            os.fsync(json_file.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
