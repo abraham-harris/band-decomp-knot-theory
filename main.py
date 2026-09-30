@@ -470,7 +470,8 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
         chain(policy_network.parameters(), value_network.parameters()), lr=learning_rate
     )
 
-    original_decomposition = copy.deepcopy(env.unwrapped.original_band_decomposition)
+    env.reset()
+    original_decomposition = copy.deepcopy(env.unwrapped.band_decomposition)
     best_decomposition = copy.deepcopy(original_decomposition)
     best_decomp_len = len(best_decomposition)
     best_action_sequence = []
@@ -893,9 +894,9 @@ if __name__=="__main__":
 
     # Settings used only when RUN_MODE == "specific_training".
     SPECIFIC_BRAID = [3, -3, 2, -3, 2, 1, 1, -2, 1, -2] 
-    SPECIFIC_BRAID_INDEX = 4
+    SPECIFIC_BRAID_INDEX = 5
     SPECIFIC_MAX_NUM_BANDS = 40
-    SPECIFIC_EPOCHS = 2
+    SPECIFIC_EPOCHS = 500
     SPECIFIC_ENV_SAMPLES = 10
     SPECIFIC_MAX_ACTIONS = 150
     SPECIFIC_MODEL_PATH = "./models/Braid_Simplificationator_specific"

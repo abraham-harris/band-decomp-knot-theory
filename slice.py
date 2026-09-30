@@ -619,7 +619,7 @@ class SliceEnv():
             if cross > 0:
                 print(" /  ", end='')
             else:
-                print(" \  ", end='')
+                print(" \\  ", end='')
             print("| "*(self.index - abs(cross) - 1))
             i += 1
         if i == row+1:
