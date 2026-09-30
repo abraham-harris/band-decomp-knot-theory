@@ -12,10 +12,13 @@ import random
 import numpy as np
 import pandas as pd
 import copy
+import argparse
+import inspect
 from pathlib import Path
 from IPython.core.interactiveshell import InteractiveShell
 from generator import RandomBraid
 from band_env import BandEnv
+from experiment_utils import load_config, initialize_run, update_run_status, save_metrics
 
 
 
@@ -683,7 +686,208 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
 
 
 
+def _json_default(value):
+    """Convert NumPy results to ordinary JSON values."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"Cannot serialize {type(value).__name__} to JSON")
+
+
+def _save_run_json(path, value):
+    with Path(path).open("w", encoding="utf-8") as output:
+        json.dump(value, output, indent=2, default=_json_default)
+        output.write("\n")
+
+
+def _resolve_experiment_config(config, name=None):
+    """Fill in function defaults without allowing legacy output-path overrides."""
+    mode = config.get("mode", "training")
+    method = config.get("training_method", "regular")
+    if mode == "training":
+        if method not in {"regular", "curriculum"}:
+            raise ValueError("training_method must be 'regular' or 'curriculum'")
+        function = ppo_main if method == "regular" else ppo_main_curriculum
+    elif mode == "specific_training":
+        function = ppo_single_braid
+    elif mode == "inference":
+        function = run_inference
+    else:
+        raise ValueError("mode must be 'training', 'specific_training', or 'inference'")
+
+    output_parameters = {"save_path", "report_path", "log_path", "forms_path", "plot_path"}
+    parameters = {
+        key: parameter for key, parameter in inspect.signature(function).parameters.items()
+        if key not in output_parameters
+    }
+    metadata = {"name", "mode", "seed"}
+    if mode == "training":
+        metadata.add("training_method")
+    if mode != "inference":
+        metadata.update({"save_model", "model_name"})
+    unknown = set(config) - set(parameters) - metadata
+    if unknown:
+        raise ValueError(f"Unknown config fields: {', '.join(sorted(unknown))}")
+
+    resolved = {
+        "name": name if name is not None else config.get("name", mode),
+        "mode": mode,
+        "seed": config.get("seed"),
+    }
+    seed = resolved["seed"]
+    if seed is not None and (type(seed) is not int or not 0 <= seed < 2**32):
+        raise ValueError("seed must be null or an integer from 0 through 2**32 - 1")
+    if mode == "training":
+        resolved["training_method"] = method
+    for key, parameter in parameters.items():
+        if key in config:
+            resolved[key] = config[key]
+        elif parameter.default is not inspect.Parameter.empty:
+            resolved[key] = parameter.default
+        else:
+            raise ValueError(f"Missing required config field: {key}")
+    if mode != "inference":
+        resolved["save_model"] = config.get("save_model", True)
+        if type(resolved["save_model"]) is not bool:
+            raise ValueError("save_model must be true or false")
+        default_model = Path(inspect.signature(function).parameters["save_path"].default).name
+        model_name = config.get("model_name", default_model)
+        reserved = {"config.json", "run_info.json", "results.json", "metrics.csv", "plot.png", "logs.json"}
+        if (not isinstance(model_name, str) or not model_name
+                or model_name in {".", ".."} or "/" in model_name or "\\" in model_name
+                or model_name in reserved):
+            raise ValueError("model_name must be a filename distinct from the run's other outputs")
+        resolved["model_name"] = model_name
+    return resolved, function, parameters
+
+
+def _training_metrics(config, returns, policy_losses, value_losses, report=None):
+    """Aggregate episode returns in training order, using a global zero-based epoch."""
+    env_samples = config["env_samples"]
+    curriculum = config.get("training_method") == "curriculum"
+    num_epochs = config["epochs"] * (len(config["difficulties"]) if curriculum else 1)
+    if env_samples <= 0:
+        raise ValueError("env_samples must be positive to aggregate epoch metrics")
+    if (len(policy_losses) != num_epochs or len(value_losses) != num_epochs
+            or len(returns) != num_epochs * env_samples):
+        raise ValueError("Training results do not match the configured epoch and episode counts")
+    if report is not None and len(report["best_length_history"]) != len(returns):
+        raise ValueError("Best-length history does not match the episode count")
+
+    rows = []
+    for epoch in range(num_epochs):
+        start = epoch * env_samples
+        end = start + env_samples
+        row = {"epoch": epoch}
+        if curriculum:
+            row["difficulty"] = config["difficulties"][epoch // config["epochs"]]
+        row.update({
+            "mean_return": float(np.mean(returns[start:end])),
+            "policy_loss": float(policy_losses[epoch]),
+            "value_loss": float(value_losses[epoch]),
+        })
+        if report is not None:
+            # This history tracks the best length so far after each episode.
+            row["best_length"] = report["best_length_history"][end - 1]
+        rows.append(row)
+    return rows
+
+
+def _training_summary(config, metrics, num_episodes, report=None):
+    """Keep final results and the best path, leaving epoch histories in the CSV."""
+    final = metrics[-1] if metrics else {}
+    result = {
+        "epochs_completed": len(metrics),
+        "episodes_completed": num_episodes,
+        "mean_return": float(np.mean([row["mean_return"] for row in metrics])) if metrics else None,
+        "final_mean_return": final.get("mean_return"),
+        "final_policy_loss": final.get("policy_loss"),
+        "final_value_loss": final.get("value_loss"),
+        "model_file": config["model_name"] if config["save_model"] else None,
+    }
+    if "difficulty" in final:
+        result["final_difficulty"] = final["difficulty"]
+    if report is not None:
+        result.update({key: value for key, value in report.items() if key != "best_length_history"})
+    return result
+
+
+def _plot_training_metrics(config, metrics, plot_path):
+    """Plot the same epoch values that are saved to metrics.csv."""
+    specific = config["mode"] == "specific_training"
+    epochs = [row["epoch"] for row in metrics]
+    figure, axes = plt.subplots(2 if specific else 1, 1, figsize=(10, 7) if specific else (10, 4))
+    axes = np.atleast_1d(axes)
+    try:
+        axes[0].plot(epochs, [row["mean_return"] for row in metrics])
+        axes[0].set_ylabel("Mean return")
+        axes[0].set_title(config["name"])
+        if specific:
+            axes[1].plot(epochs, [row["best_length"] for row in metrics])
+            axes[1].set_ylabel("Best length found")
+        for axis in axes:
+            axis.set_xlabel("Epoch (zero-based, across all stages)")
+            axis.grid()
+        figure.tight_layout()
+        figure.savefig(plot_path)
+    finally:
+        plt.close(figure)
+
+
+def run_configured_experiment(config_path, name=None, runs_root="runs"):
+    """Run a configured experiment, keeping all generated files in its run folder."""
+    config, function, parameters = _resolve_experiment_config(load_config(config_path), name)
+    run_directory = initialize_run(config, runs_root=runs_root)
+    print(f"Run directory: {run_directory}")
+    try:
+        if config["seed"] is not None:
+            random.seed(config["seed"])
+            np.random.seed(config["seed"])
+            torch.manual_seed(config["seed"])
+
+        kwargs = {key: config[key] for key in parameters}
+        if config["mode"] == "inference":
+            result = function(
+                **kwargs,
+                log_path=run_directory / "inference_logfile.txt",
+                forms_path=run_directory / "inference_final_forms.txt",
+                plot_path=run_directory / "plot.png",
+            )
+            _save_run_json(run_directory / "results.json", result)
+        else:
+            kwargs["save_path"] = (
+                run_directory / config["model_name"] if config["save_model"] else None
+            )
+            if config["mode"] == "specific_training":
+                # The returned report is included in results.json instead of a separate file.
+                kwargs["report_path"] = None
+            training_result = function(**kwargs)
+            returns, policy_losses, value_losses, _logs = training_result[:4]
+            report = training_result[4] if config["mode"] == "specific_training" else None
+            metrics = _training_metrics(config, returns, policy_losses, value_losses, report)
+            result = _training_summary(config, metrics, len(returns), report)
+            _save_run_json(run_directory / "results.json", result)
+            save_metrics(metrics, run_directory / "metrics.csv")
+            _plot_training_metrics(config, metrics, run_directory / "plot.png")
+        update_run_status(run_directory, "completed")
+    except BaseException as error:
+        update_run_status(run_directory, "failed", error=f"{type(error).__name__}: {error}")
+        raise
+    return run_directory
+
+
 if __name__=="__main__":
+    parser = argparse.ArgumentParser(description="Run a braid experiment from a JSON config.")
+    parser.add_argument("--config", help="Path to an experiment JSON config")
+    parser.add_argument("--name", help="Override the descriptive run name")
+    args = parser.parse_args()
+    if args.name is not None and args.config is None:
+        parser.error("--name requires --config")
+    if args.config is not None:
+        run_configured_experiment(args.config, name=args.name)
+        raise SystemExit(0)
+
     RUN_MODE = "specific_training"  # "training", "inference", or "specific_training"
     TRAINING_METHOD = "curriculum"  # "regular" or "curriculum" (when RUN_MODE=="training")
 
