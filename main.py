@@ -247,17 +247,16 @@ class ValueNetwork(nn.Module):
     
 
 def ppo_main(epochs=5000, env_samples=10, max_actions=150,
-             save_path="./models/Braid_Simplificationator_2000"):
-    # Hyper parameters
-    lr = 0.0008432777999828978
-    gamma = 0.9082237929205784 # discount factor
-    batch_size = 256
-    epsilon = 0.16273153856100495
-    policy_epochs = 5
+             save_path="./models/Braid_Simplificationator_2000", *,
+             braid_index=8, max_num_bands=80,
+             learning_rate=0.0008432777999828978,
+             gamma=0.9082237929205784, batch_size=256,
+             epsilon=0.16273153856100495, policy_epochs=5):
+    """Train PPO on random braids with configurable experiment parameters."""
 
     # Init environment
     # env = gym.make('BandEnv-v0', band_decomposition=[1,2,-1], train_type="deterministic") # Learn to simplify a specific braid
-    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random") # Learn to simplify random braids
+    env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="random") # Learn to simplify random braids
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
 
@@ -266,7 +265,7 @@ def ppo_main(epochs=5000, env_samples=10, max_actions=150,
     value_network = ValueNetwork(state_size).to(device)
 
     # Init optimizer
-    optim = torch.optim.Adam(chain(policy_network.parameters(), value_network.parameters()), lr=lr)
+    optim = torch.optim.Adam(chain(policy_network.parameters(), value_network.parameters()), lr=learning_rate)
 
     # Start main loop
     results_ppo = []
@@ -336,27 +335,24 @@ def ppo_main(epochs=5000, env_samples=10, max_actions=150,
 
 def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
                         max_actions_per_stage=15,
-                        save_path="./models/Braid_Simplificationator_2000"):
+                        save_path="./models/Braid_Simplificationator_2000", *,
+                        braid_index=8, max_num_bands=80,
+                        learning_rate=0.0008432777999828978,
+                        gamma=0.9082237929205784, batch_size=256,
+                        epsilon=0.16273153856100495, policy_epochs=5):
     """Same as PPO main but adjusted for curriculum learning."""
-    # Hyper parameters
-    lr = 0.0008432777999828978
-    gamma = 0.9082237929205784 # discount factor
-    batch_size = 256
-    epsilon = 0.16273153856100495
-    policy_epochs = 5
-    # max_actions = 20 # now adjusting this per difficulty
 
     # Curriculum stages
 
     # Initialize environment to get sizes
-    env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="curriculum", difficulty=difficulties[0])
+    env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="curriculum", difficulty=difficulties[0])
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
 
     # Initialize networks and optimizer once (shared across difficulties)
     policy_network = PolicyNetwork(state_size, action_size).to(device)
     value_network = ValueNetwork(state_size).to(device)
-    optim = torch.optim.Adam(chain(policy_network.parameters(), value_network.parameters()), lr=lr)
+    optim = torch.optim.Adam(chain(policy_network.parameters(), value_network.parameters()), lr=learning_rate)
 
     # Logging 
     results_ppo = []
@@ -372,7 +368,7 @@ def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
 
         # Reinitialize environment with current difficulty
         env.close()
-        env = gym.make('BandEnv-v0', braid_index=8, max_num_bands=80, train_type="curriculum", difficulty=difficulty)
+        env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="curriculum", difficulty=difficulty)
         max_actions = max_actions_per_stage * (difficulty + 1)
 
         # Start main loop for this difficulty
@@ -445,18 +441,15 @@ def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
 def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
                      env_samples=10, max_actions=150, max_num_bands=80,
                      save_path="./models/Braid_Simplificationator_specific",
-                     report_path="./logs/specific_training_report.json"):
+                     report_path="./logs/specific_training_report.json", *,
+                     learning_rate=0.0008432777999828978,
+                     gamma=0.9082237929205784, batch_size=256,
+                     epsilon=0.16273153856100495, policy_epochs=5):
     """Train PPO from scratch on one fixed braid and retain the best path found."""
     if band_decomposition is None:
         raise ValueError("band_decomposition must be set for specific-braid training")
     if len(band_decomposition) > max_num_bands:
         raise ValueError("max_num_bands cannot be smaller than the starting decomposition")
-
-    lr = 0.0008432777999828978
-    gamma = 0.9082237929205784
-    batch_size = 256
-    epsilon = 0.16273153856100495
-    policy_epochs = 5
 
     env = gym.make(
         'BandEnv-v0',
@@ -471,7 +464,7 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
     policy_network = PolicyNetwork(state_size, action_size).to(device)
     value_network = ValueNetwork(state_size).to(device)
     optim = torch.optim.Adam(
-        chain(policy_network.parameters(), value_network.parameters()), lr=lr
+        chain(policy_network.parameters(), value_network.parameters()), lr=learning_rate
     )
 
     original_decomposition = copy.deepcopy(env.unwrapped.original_band_decomposition)
@@ -581,14 +574,15 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
                   data_path="./data/braids_with_ranks.csv",
                   log_path="./logs/inference_logfile.txt",
                   forms_path="./logs/inference_final_forms.txt",
-                  plot_path="./results/inference.png"):
+                  plot_path="./results/inference.png", *,
+                  braid_index=8, max_num_bands=80, max_actions=150):
     """Evaluate a saved policy on all braids in the inference dataset."""
     braid_df = pd.read_csv(data_path)
     true_ranks = braid_df["Braid ranks"].values
     braid_words = braid_df["Braid word"]
 
     size_env = gym.make(
-        'BandEnv-v0', braid_index=8, max_num_bands=80, train_type="random"
+        'BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="random"
     )
     action_size = size_env.unwrapped.max_num_actions
     state_size = size_env.unwrapped.get_state().size
@@ -614,8 +608,8 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
         initial_decomp_lens.append(len(initial_word))
 
         env = gym.make(
-            'BandEnv-v0', band_decomposition=initial_word, braid_index=8,
-            max_num_bands=80, train_type="deterministic"
+            'BandEnv-v0', band_decomposition=initial_word, braid_index=braid_index,
+            max_num_bands=max_num_bands, train_type="deterministic"
         )
         state, _ = env.reset()
         best_decomp_len = len(env.unwrapped.band_decomposition)
@@ -629,7 +623,7 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
             num_actions_taken = 0
             done = False
             cum_reward = 0
-            while not done and num_actions_taken < 150:
+            while not done and num_actions_taken < max_actions:
                 with open(log_path, 'a') as f:
                     f.write(str(env.unwrapped.band_decomposition) + "\n")
 
