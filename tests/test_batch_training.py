@@ -44,9 +44,6 @@ class BatchTrainingTests(unittest.TestCase):
         self.device_patch = patch.object(main, "device", "cpu")
         self.device_patch.start()
         self.addCleanup(self.device_patch.stop)
-        save_patch = patch.object(main.torch, "save", side_effect=AssertionError("Unexpected model save"))
-        save_patch.start()
-        self.addCleanup(save_patch.stop)
 
     def _read_results(self, run):
         with (run / "results.csv").open(newline="", encoding="utf-8") as source:
@@ -93,6 +90,7 @@ class BatchTrainingTests(unittest.TestCase):
         self.assertEqual([row["seed"] for row in rows], ["7", "8"])
         self.assertEqual({path.name for path in run.iterdir()},
                          {"config.json", "run_info.json", "dataset.csv", "results.csv", "plot.png"})
+        self.assertFalse((run / "models").exists())
         status = json.loads((run / "run_info.json").read_text())
         self.assertEqual(status["status"], "completed")
         self.assertNotIn("error", status)
@@ -169,6 +167,98 @@ class BatchTrainingTests(unittest.TestCase):
         run = next((self.root / "runs").iterdir())
         self.assertEqual(batch.plot_batch_results(run), run / "plot.png")
         self.assertGreater((run / "plot.png").stat().st_size, 0)
+
+    def test_batch_plot_sorts_smallest_rank_then_starting_length(self):
+        from matplotlib.axes import Axes
+
+        rows = []
+        for braid_id, rank, initial, best in (
+                (0, 2, 4, 3), (1, 1, 8, 5), (2, 1, 3, 2)):
+            row = dict.fromkeys(batch.RESULT_FIELDS, "")
+            row.update(braid_id=braid_id, true_rank=rank,
+                       initial_length=initial, best_length=best)
+            rows.append(row)
+        batch._save_results(rows, self.root / "results.csv")
+        plotted = []
+        scatter = Axes.scatter
+
+        def capture(axis, x, y, *args, **kwargs):
+            plotted.append(list(y))
+            return scatter(axis, x, y, *args, **kwargs)
+
+        with patch.object(Axes, "scatter", capture):
+            batch.plot_batch_results(self.root)
+        self.assertEqual(plotted[0], [1, 1, 2])
+        self.assertEqual(plotted[1], [3, 8, 4])
+
+    def test_iterative_saves_final_policy_per_index_without_checkpoint(self):
+        with self.dataset.open("a", newline="", encoding="utf-8") as output:
+            csv.writer(output).writerow([3, 3, "{1, -1, 2, -2, 1}"])
+        config = json.loads(self.config.read_text())
+        config.update(iterative=True, braid_index=4)
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        trainer = main.ppo_single_braid
+        calls = []
+        trained_states = []
+
+        @wraps(trainer)
+        def recorded(**kwargs):
+            calls.append(kwargs)
+            result = trainer(**kwargs)
+            trained_states.append(result[5])
+            return result
+
+        save_policy_model = batch._save_policy_model
+
+        def save_at_end(policy_state, path):
+            self.assertEqual(len(trained_states), 3)
+            save_policy_model(policy_state, path)
+
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(
+                main, "ppo_single_braid", recorded), patch.object(
+                batch, "_save_policy_model", save_at_end):
+            batch.run_batch_experiment(self.config, runs_root=self.root / "runs")
+        run = next((self.root / "runs").iterdir())
+        self.assertEqual([row["braid_id"] for row in self._read_results(run)], ["0", "1", "2"])
+        self.assertFalse((run / "training_checkpoint.pt").exists())
+        self.assertEqual({path.name for path in (run / "models").iterdir()},
+                         {"braid_index_3.pt", "braid_index_4.pt"})
+        self.assertIsNone(calls[0]["training_state"])
+        self.assertIsNone(calls[1]["training_state"])
+        self.assertIsNotNone(calls[2]["training_state"])
+        self.assertTrue(torch.equal(
+            calls[2]["training_state"]["policy"]["net.0.weight"],
+            trained_states[0]["policy"]["net.0.weight"],
+        ))
+        self.assertTrue(torch.equal(
+            torch.load(run / "models" / "braid_index_3.pt", weights_only=True)["net.0.weight"],
+            trained_states[2]["policy"]["net.0.weight"],
+        ))
+        self.assertTrue(torch.equal(
+            torch.load(run / "models" / "braid_index_4.pt", weights_only=True)["net.0.weight"],
+            trained_states[1]["policy"]["net.0.weight"],
+        ))
+        self.assertTrue((run / "plot.png").exists())
+        with self.assertRaisesRegex(ValueError, "cannot resume without optimizer state"):
+            batch.run_batch_experiment(resume=run)
+
+    def test_iterative_selection_uses_rank_then_length_with_index_limit(self):
+        braids = [
+            {"braid_id": 0, "braid_index": 3, "true_rank": 2, "word": [1, 2]},
+            {"braid_id": 1, "braid_index": 4, "true_rank": 1, "word": [1, 2, 3]},
+            {"braid_id": 2, "braid_index": 5, "true_rank": 0, "word": [1]},
+            {"braid_id": 3, "braid_index": 3, "true_rank": 1, "word": [1]},
+        ]
+        selected = batch._select_braids(braids, {"iterative": True, "braid_index": 4})
+        self.assertEqual([braid["braid_id"] for braid in selected], [3, 1, 0])
+
+    def test_iterative_requires_braid_index_before_creating_run(self):
+        config = json.loads(self.config.read_text())
+        config["iterative"] = True
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "requires braid_index"):
+            batch.run_batch_experiment(self.config, runs_root=self.root / "runs")
+        self.assertFalse((self.root / "runs").exists())
 
 
 if __name__ == "__main__":

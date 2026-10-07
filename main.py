@@ -448,8 +448,9 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
                      learning_rate=0.0008432777999828978,
                      gamma=0.9082237929205784, batch_size=256,
                      epsilon=0.16273153856100495, policy_epochs=5,
-                     collect_logs=True, show_progress=True):
-    """Train PPO from scratch on one fixed braid and retain the best path found.
+                     collect_logs=True, show_progress=True,
+                     training_state=None, return_training_state=False):
+    """Train PPO on one fixed braid and retain the best path found.
 
     Set collect_logs=False to skip retaining epoch environment logs, and
     show_progress=False for quiet batch training. Neither changes the best-path
@@ -475,6 +476,10 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
     optim = torch.optim.Adam(
         chain(policy_network.parameters(), value_network.parameters()), lr=learning_rate
     )
+    if training_state is not None:
+        policy_network.load_state_dict(training_state["policy"])
+        value_network.load_state_dict(training_state["value"])
+        optim.load_state_dict(training_state["optimizer"])
 
     env.reset()
     original_decomposition = copy.deepcopy(env.unwrapped.band_decomposition)
@@ -579,7 +584,14 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
         print(f"Best decomposition length: {report['best_length']}")
         print(f"Best decomposition: {report['best_decomposition']}")
 
-    return results_ppo, policy_loss_ppo, value_loss_ppo, logs, report
+    result = (results_ppo, policy_loss_ppo, value_loss_ppo, logs, report)
+    if return_training_state:
+        return result + ({
+            "policy": policy_network.state_dict(),
+            "value": value_network.state_dict(),
+            "optimizer": optim.state_dict(),
+        },)
+    return result
 
 
 def run_inference(model_path="./models/Braid_Simplificationator_2000",
@@ -601,7 +613,7 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
     size_env.close()
 
     model = PolicyNetwork(state_size, action_size).to(device)
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
@@ -667,9 +679,7 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
         for item in simplest_forms:
             f.write(f"{item}\n")
 
-    comparison = sorted(
-        zip(true_ranks, initial_decomp_lens, best_decomp_lens), reverse=True
-    )
+    comparison = sorted(zip(true_ranks, initial_decomp_lens, best_decomp_lens))
     sorted_optimal, sorted_initial, sorted_best = zip(*comparison)
 
     plt.figure(figsize=(13, 4))

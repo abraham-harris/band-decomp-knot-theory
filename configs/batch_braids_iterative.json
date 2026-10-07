@@ -1,0 +1,17 @@
+{
+  "name": "batch_braids_iterative_up_to_8_50_epochs",
+  "mode": "batch_specific_training",
+  "data_path": "data/braids_with_ranks.csv",
+  "iterative": true,
+  "braid_index": 8,
+  "seed": 0,
+  "max_num_bands": 80,
+  "epochs": 50,
+  "env_samples": 10,
+  "max_actions": 150,
+  "learning_rate": 0.0008432777999828978,
+  "gamma": 0.9082237929205784,
+  "batch_size": 256,
+  "epsilon": 0.16273153856100495,
+  "policy_epochs": 5
+}

@@ -1,7 +1,7 @@
-"""Train an independent PPO policy on each CSV braid, saving completed results.
+"""Train PPO on CSV braids, independently or iteratively, saving completed results.
 
-Run with --config, resume a run with --resume, or plot saved rows with --plot-only.
-No per-braid models, reports, training plots, or environment logs are written.
+Run with --config, resume independent runs with --resume, or plot saved rows
+with --plot-only. Iterative runs save final policies in their models directory.
 """
 
 import argparse
@@ -33,18 +33,28 @@ TRAINING_FIELDS = (
 
 
 def _resolve_config(config, trainer, name=None):
-    allowed = set(TRAINING_FIELDS) | {"name", "mode", "seed", "data_path"}
+    allowed = set(TRAINING_FIELDS) | {"name", "mode", "seed", "data_path", "iterative", "braid_index"}
     unknown = set(config) - allowed
     if unknown:
         raise ValueError(f"Unknown config fields: {', '.join(sorted(unknown))}")
     if config.get("mode", "batch_specific_training") != "batch_specific_training":
         raise ValueError("mode must be 'batch_specific_training'")
+    iterative = config.get("iterative", False)
+    braid_index = config.get("braid_index")
+    if type(iterative) is not bool:
+        raise ValueError("iterative must be a boolean")
+    if iterative and (type(braid_index) is not int or braid_index < 2):
+        raise ValueError("iterative training requires braid_index >= 2 as an upper limit")
+    if not iterative and braid_index is not None:
+        raise ValueError("braid_index requires iterative=true")
     parameters = inspect.signature(trainer).parameters
     resolved = {
         "name": name if name is not None else config.get("name", "batch_braids"),
         "mode": "batch_specific_training",
         "data_path": config.get("data_path", "data/braids_with_ranks.csv"),
         "seed": config.get("seed"),
+        "iterative": iterative,
+        "braid_index": braid_index,
         **{key: config.get(key, parameters[key].default) for key in TRAINING_FIELDS},
     }
     seed = resolved["seed"]
@@ -137,6 +147,38 @@ def _load_results(path, braids):
     return rows
 
 
+def _select_braids(braids, config):
+    if not config["iterative"]:
+        return braids
+    selected = [braid for braid in braids if braid["braid_index"] <= config["braid_index"]]
+    # Best achieved length is not known until after training.
+    return sorted(selected, key=lambda braid: (
+        braid["true_rank"], len(braid["word"]), braid["braid_id"]
+    ))
+
+
+def _save_policy_model(policy_state, path):
+    """Atomically save final policy weights in a run's models directory."""
+    import torch
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=f".{path.stem}_",
+            suffix=".tmp", delete=False,
+        ) as output:
+            temporary_path = Path(output.name)
+            torch.save(policy_state, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
 def plot_batch_results(run_directory):
     """Plot completed rows only, including results from an interrupted run."""
     import matplotlib.pyplot as plt
@@ -146,9 +188,8 @@ def plot_batch_results(run_directory):
         rows = list(csv.DictReader(source))
     if not rows:
         raise ValueError("No completed braids to plot yet")
-    # Match inference's descending rank / starting length / best length ordering.
     rows.sort(key=lambda row: tuple(int(row[key]) for key in
-                                   ("true_rank", "initial_length", "best_length")), reverse=True)
+                                   ("true_rank", "initial_length", "best_length", "braid_id")))
     x_values = range(1, len(rows) + 1)
     figure, axis = plt.subplots(figsize=(13, 4))
     try:
@@ -188,23 +229,38 @@ def run_batch_experiment(config_path=None, *, resume=None, name=None, runs_root=
         if hashlib.sha256(dataset_bytes).hexdigest() != config["dataset_sha256"]:
             raise ValueError("The run's dataset snapshot has changed")
         # Validate saved parameters using the same rules as a new experiment.
-        _resolve_config({key: value for key, value in config.items()
-                         if key not in {"dataset_sha256", "num_braids"}}, ppo_single_braid)
+        resolved = _resolve_config({key: value for key, value in config.items()
+                                    if key not in {"dataset_sha256", "num_braids"}},
+                                   ppo_single_braid)
+        config.update(iterative=resolved["iterative"], braid_index=resolved["braid_index"])
         braids = _load_braids(dataset_bytes, config["max_num_bands"])
         rows = _load_results(run_directory / "results.csv", braids)
     else:
         config = _resolve_config(load_config(config_path), ppo_single_braid, name)
         dataset_bytes = Path(config["data_path"]).read_bytes()
         braids = _load_braids(dataset_bytes, config["max_num_bands"])
-        config.update(dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(), num_braids=len(braids))
+        selected_count = len(_select_braids(braids, config))
+        if not selected_count:
+            raise ValueError(f"Dataset contains no braids up to braid_index={config['braid_index']}")
+        config.update(dataset_sha256=hashlib.sha256(dataset_bytes).hexdigest(),
+                      num_braids=selected_count)
         run_directory = initialize_run(config, runs_root=runs_root)
         (run_directory / "dataset.csv").write_bytes(dataset_bytes)
         rows = []
         _save_results(rows, run_directory / "results.csv")
 
+    braids = _select_braids(braids, config)
+    if not braids:
+        raise ValueError(f"Dataset contains no braids up to braid_index={config['braid_index']}")
+    if config["iterative"] and rows:
+        raise ValueError("Iterative training cannot resume without optimizer state; start a new run")
+    training_states = {}
+
     print(f"Run directory: {run_directory}", flush=True)
     completed = {int(row["braid_id"]) for row in rows}
-    print(f"Completed: {len(completed)}/{len(braids)}; each remaining braid trains a fresh policy.",
+    training_description = (f"one continuing policy per braid index up to {config['braid_index']}"
+                            if config["iterative"] else "a fresh policy per braid")
+    print(f"Completed: {len(completed)}/{len(braids)}; {training_description}.",
           flush=True)
     update_run_status(run_directory, "running")
     kwargs = {key: config[key] for key in TRAINING_FIELDS}
@@ -224,6 +280,8 @@ def run_batch_experiment(config_path=None, *, resume=None, name=None, runs_root=
             training_result = ppo_single_braid(
                 band_decomposition=braid["word"], braid_index=braid["braid_index"],
                 save_path=None, report_path=None, collect_logs=False, show_progress=False,
+                training_state=training_states.get(braid["braid_index"]),
+                return_training_state=config["iterative"],
                 **kwargs,
             )
             report = training_result[4]
@@ -238,11 +296,17 @@ def run_batch_experiment(config_path=None, *, resume=None, name=None, runs_root=
                 **{key: json.dumps(report[key]) for key in
                    ("best_decomposition", "best_action_sequence", "best_found_at")},
             }
+            if config["iterative"]:
+                training_states[braid["braid_index"]] = training_result[5]
             rows.append(row)
             _save_results(rows, run_directory / "results.csv")
             print(f"Saved braid {braid_id}: best length {row['best_length']}, "
                   f"known rank {row['true_rank']} ({len(rows)}/{len(braids)} completed)", flush=True)
             del training_result, report
+        if config["iterative"]:
+            for braid_index, state in sorted(training_states.items()):
+                _save_policy_model(state["policy"],
+                                   run_directory / "models" / f"braid_index_{braid_index}.pt")
         plot_batch_results(run_directory)
         update_run_status(run_directory, "completed")
     except BaseException as error:
