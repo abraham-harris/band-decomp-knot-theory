@@ -153,6 +153,24 @@ class BatchTrainingTests(unittest.TestCase):
             batch.run_batch_experiment(self.config, runs_root=self.root / "runs")
         self.assertFalse((self.root / "runs").exists())
 
+    def test_one_hot_config_trains_and_is_saved(self):
+        config = json.loads(self.config.read_text())
+        config["observation_type"] = "one_hot"
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            run = batch.run_batch_experiment(self.config, runs_root=self.root / "runs")
+        saved = json.loads((run / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["observation_type"], "one_hot")
+        self.assertEqual(len(self._read_results(run)), 2)
+
+    def test_invalid_observation_type_fails_before_creating_run(self):
+        config = json.loads(self.config.read_text())
+        config["observation_type"] = "unknown"
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "observation_type"):
+            batch.run_batch_experiment(self.config, runs_root=self.root / "runs")
+        self.assertFalse((self.root / "runs").exists())
+
     def test_partial_results_plot_without_training(self):
         @wraps(main.ppo_single_braid)
         def interrupted(**kwargs):

@@ -251,7 +251,7 @@ class ValueNetwork(nn.Module):
 
 def ppo_main(epochs=5000, env_samples=10, max_actions=150,
              save_path="./models/Braid_Simplificationator_2000", *,
-             braid_index=8, max_num_bands=80,
+             braid_index=8, max_num_bands=80, observation_type="lk_matrix",
              learning_rate=0.0008432777999828978,
              gamma=0.9082237929205784, batch_size=256,
              epsilon=0.16273153856100495, policy_epochs=5):
@@ -259,7 +259,8 @@ def ppo_main(epochs=5000, env_samples=10, max_actions=150,
 
     # Init environment
     # env = gym.make('BandEnv-v0', band_decomposition=[1,2,-1], train_type="deterministic") # Learn to simplify a specific braid
-    env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="random") # Learn to simplify random braids
+    env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands,
+                   train_type="random", observation_type=observation_type) # Learn to simplify random braids
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
 
@@ -339,7 +340,7 @@ def ppo_main(epochs=5000, env_samples=10, max_actions=150,
 def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
                         max_actions_per_stage=15,
                         save_path="./models/Braid_Simplificationator_2000", *,
-                        braid_index=8, max_num_bands=80,
+                        braid_index=8, max_num_bands=80, observation_type="lk_matrix",
                         learning_rate=0.0008432777999828978,
                         gamma=0.9082237929205784, batch_size=256,
                         epsilon=0.16273153856100495, policy_epochs=5):
@@ -348,7 +349,9 @@ def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
     # Curriculum stages
 
     # Initialize environment to get sizes
-    env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="curriculum", difficulty=difficulties[0])
+    env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands,
+                   train_type="curriculum", difficulty=difficulties[0],
+                   observation_type=observation_type)
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
 
@@ -371,7 +374,9 @@ def ppo_main_curriculum(epochs=500, env_samples=10, difficulties=(0, 1, 2, 3),
 
         # Reinitialize environment with current difficulty
         env.close()
-        env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="curriculum", difficulty=difficulty)
+        env = gym.make('BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands,
+                       train_type="curriculum", difficulty=difficulty,
+                       observation_type=observation_type)
         max_actions = max_actions_per_stage * (difficulty + 1)
 
         # Start main loop for this difficulty
@@ -449,7 +454,8 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
                      gamma=0.9082237929205784, batch_size=256,
                      epsilon=0.16273153856100495, policy_epochs=5,
                      collect_logs=True, show_progress=True,
-                     training_state=None, return_training_state=False):
+                     training_state=None, return_training_state=False,
+                     observation_type="lk_matrix"):
     """Train PPO on one fixed braid and retain the best path found.
 
     Set collect_logs=False to skip retaining epoch environment logs, and
@@ -467,6 +473,7 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
         braid_index=braid_index,
         max_num_bands=max_num_bands,
         train_type="deterministic",
+        observation_type=observation_type,
     )
     action_size = env.unwrapped.max_num_actions
     state_size = env.unwrapped.get_state().size
@@ -599,14 +606,16 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
                   log_path="./logs/inference_logfile.txt",
                   forms_path="./logs/inference_final_forms.txt",
                   plot_path="./results/inference.png", *,
-                  braid_index=8, max_num_bands=80, max_actions=150):
+                  braid_index=8, max_num_bands=80, max_actions=150,
+                  observation_type="lk_matrix"):
     """Evaluate a saved policy on all braids in the inference dataset."""
     braid_df = pd.read_csv(data_path)
     true_ranks = braid_df["Braid ranks"].values
     braid_words = braid_df["Braid word"]
 
     size_env = gym.make(
-        'BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands, train_type="random"
+        'BandEnv-v0', braid_index=braid_index, max_num_bands=max_num_bands,
+        train_type="random", observation_type=observation_type,
     )
     action_size = size_env.unwrapped.max_num_actions
     state_size = size_env.unwrapped.get_state().size
@@ -633,7 +642,8 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
 
         env = gym.make(
             'BandEnv-v0', band_decomposition=initial_word, braid_index=braid_index,
-            max_num_bands=max_num_bands, train_type="deterministic"
+            max_num_bands=max_num_bands, train_type="deterministic",
+            observation_type=observation_type,
         )
         state, _ = env.reset()
         best_decomp_len = len(env.unwrapped.band_decomposition)
@@ -766,6 +776,8 @@ def _resolve_experiment_config(config, name=None):
             resolved[key] = parameter.default
         else:
             raise ValueError(f"Missing required config field: {key}")
+    if resolved["observation_type"] not in ("lk_matrix", "one_hot"):
+        raise ValueError("observation_type must be 'lk_matrix' or 'one_hot'")
     if mode != "inference":
         resolved["save_model"] = config.get("save_model", True)
         if type(resolved["save_model"]) is not bool:

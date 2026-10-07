@@ -28,7 +28,7 @@ RESULT_FIELDS = (
 )
 TRAINING_FIELDS = (
     "epochs", "env_samples", "max_actions", "max_num_bands", "learning_rate",
-    "gamma", "batch_size", "epsilon", "policy_epochs",
+    "gamma", "batch_size", "epsilon", "policy_epochs", "observation_type",
 )
 
 
@@ -70,6 +70,8 @@ def _resolve_config(config, trainer, name=None):
                 or value < 0 or (key == "learning_rate" and value == 0)
                 or (key == "gamma" and value > 1)):
             raise ValueError(f"Invalid {key}: {value}")
+    if resolved["observation_type"] not in ("lk_matrix", "one_hot"):
+        raise ValueError("observation_type must be 'lk_matrix' or 'one_hot'")
     return resolved
 
 

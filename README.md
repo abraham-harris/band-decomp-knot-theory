@@ -108,6 +108,17 @@ Both batch modes record the shortest decomposition seen at any step, including
 the starting one. Known rank is used for comparison, not as a stopping rule or
 proof of minimality. The supplied configs train 50 epochs per braid.
 
+Set `"observation_type": "lk_matrix"` (the default) or `"one_hot"` in a
+training config to compare policy inputs. Matrix observations contain one
+flattened Lawrence–Krammer matrix per band. One-hot observations contain up to
+13 ordered crossings per band, with `2 * (braid_index - 1)` possible signed
+crossings per slot. Both use `max_num_bands` band slots; longer decompositions
+cannot be encoded, and one-hot bands cannot exceed 13 crossings. Band
+cancellation uses the Lawrence–Krammer matrices in either mode. Use the same
+observation type when loading a saved policy for inference; the input dimensions
+differ. Run each setting as a separate experiment so the saved config records
+which was used.
+
 ### Independent policies
 
 ```bash

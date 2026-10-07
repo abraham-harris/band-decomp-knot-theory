@@ -6,6 +6,7 @@
   "braid_index": 8,
   "seed": 0,
   "max_num_bands": 80,
+  "observation_type": "lk_matrix",
   "epochs": 50,
   "env_samples": 10,
   "max_actions": 150,
