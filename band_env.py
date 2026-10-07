@@ -5,9 +5,12 @@ from generator import RandomBraid
 
 
 class BandEnv(gym.Env):
-    def __init__(self, band_decomposition=[], braid_index=3, max_num_bands=16, timeout=200, train_type="random", difficulty=0):
+    def __init__(self, band_decomposition=[], braid_index=3, max_num_bands=16, timeout=200, train_type="random", difficulty=0, observation_type="lk_matrix"):
         super(BandEnv, self).__init__()
         self.max_band_len=13
+        if observation_type not in ("lk_matrix", "one_hot"):
+            raise ValueError("observation_type must be 'lk_matrix' or 'one_hot'")
+        self.observation_type = observation_type
         # Reserve four band slots for the two cancelling pairs, then split the remaining capacity between the two generated words
         curriculum_word_limit = (max_num_bands - 4) // 2
         if train_type == "curriculum" and curriculum_word_limit < 1:
@@ -136,7 +139,10 @@ class BandEnv(gym.Env):
             elif sgn==0:
                 self.matrices[jjj]=np.identity(self.matrix_size)
         self.mat_decomposition = self.bands_to_mat()
-        self.output_size = self.max_num_bands*self.matrix_size*self.matrix_size
+        self.matrix_output_size = self.max_num_bands*self.matrix_size*self.matrix_size
+        self.one_hot_output_size = self.max_num_bands*self.max_band_len*len(self.possible_crossings)
+        self.output_size = (self.matrix_output_size if self.observation_type == "lk_matrix"
+                            else self.one_hot_output_size)
         self.action_space = spaces.Discrete(self.max_num_actions)
         self.observation_space = spaces.Box(low=-max_num_bands, high=max_num_bands, shape=(self.get_state().size,))
         self.num_actions_taken = 0
@@ -565,9 +571,17 @@ class BandEnv(gym.Env):
 
     def get_state(self):
         """Returns a vector of length self.output_size which represents the current band decomposition."""
+        if self.observation_type == "one_hot":
+            return self.get_state_ohe()
+        return self.get_state_lk()
+
+    def get_state_lk(self):
+        """Encode each band by its Lawrence-Krammer matrix."""
         c = np.array(self.bands_to_mat()) # array where each element is a LK matrix of a band
         ca = np.reshape(c, len(self.band_decomposition)*self.matrix_size*self.matrix_size)
-        da = np.pad(ca, pad_width=(0, self.output_size-len(ca)), mode='constant', constant_values=0)
+        if len(ca) > self.matrix_output_size:
+            raise ValueError("band decomposition exceeds max_num_bands observation capacity")
+        da = np.pad(ca, pad_width=(0, self.matrix_output_size-len(ca)), mode='constant', constant_values=0)
 
         # Normalize state matrix
         norm = np.linalg.norm(da, ord=1)
@@ -577,35 +591,19 @@ class BandEnv(gym.Env):
         return da.astype(np.float32)
 
     def get_state_ohe(self):
-        """Returns a vector in an OHE format that represents the current band decomposition."""
-        decomp = self.band_decomposition.copy()
-        # Rewrite each band as a one-hot encoding
-        state = []
-        for band in decomp:
-            ohe_band = []
-            for crossing in band:
-                one_hot = [0] * len(self.possible_crossings)
-                index = np.where(self.possible_crossings == crossing)[0][0]
-                one_hot[index] = 1
-                ohe_band.append(one_hot)
-            # Pad so all are equal length
-            while(len(ohe_band) < 13):
-                ohe_band.append([0] * len(self.possible_crossings))
-            state.append(ohe_band)
-        try:
-            state = np.array(state).astype(np.float32)
-        except ValueError:
-            print("State element shapes:")
-            for ohe_band in state:
-                print(len(ohe_band))
-            raise ValueError
-
-        state = state.flatten()
-        state = np.pad(state, pad_width=(0, self.output_size - len(state)), mode='constant', constant_values=0)
-
-        # print("OHE State Shape:", np.shape(state))
-        # print("Desired Output Size:", self.output_size)
-        return state
+        """Encode ordered crossings within fixed-size band slots."""
+        if len(self.band_decomposition) > self.max_num_bands:
+            raise ValueError("band decomposition exceeds max_num_bands observation capacity")
+        state = np.zeros((self.max_num_bands, self.max_band_len,
+                          len(self.possible_crossings)), dtype=np.float32)
+        crossing_indices = {int(crossing): index for index, crossing in
+                            enumerate(self.possible_crossings)}
+        for band_index, band in enumerate(self.band_decomposition):
+            if len(band) > self.max_band_len:
+                raise ValueError(f"band {band_index} exceeds max_band_len={self.max_band_len}")
+            for crossing_index, crossing in enumerate(band):
+                state[band_index, crossing_index, crossing_indices[crossing]] = 1
+        return state.flatten()
 
     def map_action(self,number):
         """ Maps number, thought of as a short action value, to the corresponding full action value. """
