@@ -8,7 +8,7 @@ In knot theory, a braid is a set of $n$ strings that are attached to a horizonta
   <br>
   <sub><em>Figure 1: an example of a braid.</em></sub>
   <br>
-  <sub>Source: Dylan Skinner Blog (https://dylanskinner65.github.io/blog/braids.html)</sub>
+  <sub>Source: Dylan Skinner Blog (https://dylanskinner.dev/blog/braids)</sub>
   <br><br>
 </div>
 
@@ -19,7 +19,7 @@ One reason braids are useful in knot theory is that they can be easily converted
   <br>
   <sub><em>Figure 2: turning a braid into a knot.</em></sub>
   <br>
-  <sub>Source: Dylan Skinner Blog (https://dylanskinner65.github.io/blog/braids.html)</sub>
+  <sub>Source: Dylan Skinner Blog (https://dylanskinner.dev/blog/braids)</sub>
   <br><br>
 </div>
 
