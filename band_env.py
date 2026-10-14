@@ -149,14 +149,14 @@ class BandEnv(gym.Env):
         self.original_length = len(self.band_decomposition)
         self.matrix_size = self.braid_index*(self.braid_index - 1) // 2
         self.matrices = {}
-        for jjj in range(-self.braid_index+1,self.braid_index):
-            sgn=np.sign(jjj)
-            if sgn==-1:
-                self.matrices[jjj]=np.linalg.inv(self.LKrep(self.braid_index,np.abs(jjj)))
-            elif sgn==1:
-                self.matrices[jjj]=self.LKrep(self.braid_index,np.abs(jjj))
-            elif sgn==0:
-                self.matrices[jjj]=np.identity(self.matrix_size)
+        for generator in range(-self.braid_index + 1, self.braid_index):
+            sign = np.sign(generator)
+            if sign == -1:
+                self.matrices[generator] = np.linalg.inv(self.LKrep(self.braid_index, np.abs(generator)))
+            elif sign == 1:
+                self.matrices[generator] = self.LKrep(self.braid_index, np.abs(generator))
+            elif sign == 0:
+                self.matrices[generator] = np.identity(self.matrix_size)
         self.mat_decomposition = self.bands_to_mat()
         self.matrix_output_size = self.max_num_bands*self.matrix_size*self.matrix_size
         self.one_hot_output_size = self.max_num_bands*self.max_band_len*len(self.possible_crossings)
@@ -278,14 +278,14 @@ class BandEnv(gym.Env):
         if self.train_type != "curriculum": # We already did this above in the curriculum setup
             self.fix_list()
         self.matrices={}
-        for jjj in range(-self.braid_index+1,self.braid_index):
-            sgn = np.sign(jjj)
-            if sgn == -1:
-                self.matrices[jjj] = np.linalg.inv(self.LKrep(self.braid_index,np.abs(jjj)))
-            elif sgn == 1:
-                self.matrices[jjj] = self.LKrep(self.braid_index,np.abs(jjj))
-            elif sgn == 0:
-                self.matrices[jjj] = np.identity(self.matrix_size)
+        for generator in range(-self.braid_index + 1, self.braid_index):
+            sign = np.sign(generator)
+            if sign == -1:
+                self.matrices[generator] = np.linalg.inv(self.LKrep(self.braid_index, np.abs(generator)))
+            elif sign == 1:
+                self.matrices[generator] = self.LKrep(self.braid_index, np.abs(generator))
+            elif sign == 0:
+                self.matrices[generator] = np.identity(self.matrix_size)
         self.mat_decomposition = self.bands_to_mat()
         self.log = {"States": [], "Scores": [], "Moves": []}
         observation = self.get_state().astype(np.float32)
@@ -312,10 +312,12 @@ class BandEnv(gym.Env):
 
     def fix_list(self):
         '''Converts band decomposition into a list of lists, and converts each element of each list into an int'''
-        for jjj in range(len(self.band_decomposition)):
-            if not isinstance(self.band_decomposition[jjj],list):
-                self.band_decomposition[jjj] = [self.band_decomposition[jjj]]
-            self.band_decomposition[jjj] = [int(mmm) for mmm in self.band_decomposition[jjj]]
+        for band_index in range(len(self.band_decomposition)):
+            if not isinstance(self.band_decomposition[band_index], list):
+                self.band_decomposition[band_index] = [self.band_decomposition[band_index]]
+            self.band_decomposition[band_index] = [
+                int(crossing) for crossing in self.band_decomposition[band_index]
+            ]
         return
 
     def index(self,n,i,j):
@@ -325,59 +327,59 @@ class BandEnv(gym.Env):
         M=np.zeros((n*(n-1)//2,n*(n-1)//2))
         q=np.sqrt(2)
         t=np.pi
-        for iii in range(1,n):
-            for jjj in range(iii+1,n+1):
-                if (k<iii-1)or(jjj<k):
-                    M[self.index(n,iii,jjj),self.index(n,iii,jjj)]=1
-                elif k==iii-1:
-                    M[self.index(n,iii-1,jjj),self.index(n,iii,jjj)]= 1
-                    M[self.index(n,iii,jjj),self.index(n,iii,jjj)] = 1-q
-                elif (k==iii) and (k<jjj-1):
-                    M[self.index(n,iii,iii+1),self.index(n,iii,jjj)] = t*q*(q - 1)
-                    M[self.index(n,iii+1,jjj),self.index(n,iii,jjj)] = q
-                elif (k==iii) and (k ==jjj-1):
-                    M[self.index(n,iii,jjj),self.index(n,iii,jjj)] = t*q*q
-                elif (iii<k) and (k<jjj - 1):
-                    M[self.index(n,iii,jjj),self.index(n,iii,jjj)] = 1
-                    M[self.index(n,k,k+1),self.index(n,iii,jjj)] = t*q**(k - iii)*(q - 1)**2
-                elif (k==jjj-1):
-                    M[self.index(n,iii,jjj-1),self.index(n,iii,jjj)] = 1
-                    M[self.index(n,jjj-1,jjj),self.index(n,iii,jjj)] = t*q**(jjj-iii)*(q - 1)
-                elif (k==jjj):
-                    M[self.index(n,iii,jjj),self.index(n,iii,jjj)]=1-q
-                    M[self.index(n,iii,jjj+1),self.index(n,iii,jjj)]=q
+        for i in range(1, n):
+            for j in range(i + 1, n + 1):
+                if (k < i - 1) or (j < k):
+                    M[self.index(n, i, j), self.index(n, i, j)] = 1
+                elif k == i - 1:
+                    M[self.index(n, i - 1, j), self.index(n, i, j)] = 1
+                    M[self.index(n, i, j), self.index(n, i, j)] = 1 - q
+                elif (k == i) and (k < j - 1):
+                    M[self.index(n, i, i + 1), self.index(n, i, j)] = t*q*(q - 1)
+                    M[self.index(n, i + 1, j), self.index(n, i, j)] = q
+                elif (k == i) and (k == j - 1):
+                    M[self.index(n, i, j), self.index(n, i, j)] = t*q*q
+                elif (i < k) and (k < j - 1):
+                    M[self.index(n, i, j), self.index(n, i, j)] = 1
+                    M[self.index(n, k, k + 1), self.index(n, i, j)] = t*q**(k - i)*(q - 1)**2
+                elif k == j - 1:
+                    M[self.index(n, i, j - 1), self.index(n, i, j)] = 1
+                    M[self.index(n, j - 1, j), self.index(n, i, j)] = t*q**(j - i)*(q - 1)
+                elif k == j:
+                    M[self.index(n, i, j), self.index(n, i, j)] = 1 - q
+                    M[self.index(n, i, j + 1), self.index(n, i, j)] = q
         return M
 
-    def reduce_list(self,lis):
-      jjj=0
-      while jjj < len(lis)-1:
-        if lis[jjj]==-lis[jjj+1]:
-          del lis[jjj+1]
-          del lis[jjj]
-          if jjj>0:
-            jjj-=1
-        else:
-          jjj+=1
-      return lis
+    def reduce_list(self, lis):
+        index = 0
+        while index < len(lis) - 1:
+            if lis[index] == -lis[index + 1]:
+                del lis[index + 1]
+                del lis[index]
+                if index > 0:
+                    index -= 1
+            else:
+                index += 1
+        return lis
 
     def simplify(self):
-      for iii in range(len(self.band_decomposition)):
-        self.reduce_list(self.band_decomposition[iii])
-      return self.band_decomposition
+        for band in self.band_decomposition:
+            self.reduce_list(band)
+        return self.band_decomposition
 
     def bands_to_mat(self):
         """ Converts the current band decomposition to a list of matrices using the Lawrence-Krammer representaton. """
-        self.mat_decomposition=self.band_decomposition.copy()
-        for jjj in range(len(self.band_decomposition)):
-            self.mat=np.identity(self.matrix_size)
-            for iii in self.mat_decomposition[jjj]:
-                self.mat=self.mat@self.matrices[iii] # This is the LK-rep part
-            self.mat_decomposition[jjj]=self.mat
+        self.mat_decomposition = self.band_decomposition.copy()
+        for band_index in range(len(self.band_decomposition)):
+            self.mat = np.identity(self.matrix_size)
+            for crossing in self.mat_decomposition[band_index]:
+                self.mat = self.mat @ self.matrices[crossing]  # This is the LK-rep part
+            self.mat_decomposition[band_index] = self.mat
         return self.mat_decomposition
 
     def invert_band(self, band):
         """ Inverts the given band. """
-        return [-band[-iii-1] for iii in range(len(band))]
+        return [-band[-i - 1] for i in range(len(band))]
 
     def left_slide(self, position):
         """ Performs a left band slide at the band located at a valid position. """
@@ -454,9 +456,10 @@ class BandEnv(gym.Env):
         """ Returns a list of positions at which the following two bands can be cancelled.  """
         self.bands_to_mat()
         self.del_list=[]
-        for iii in range(len(self.band_decomposition)-1):
-            if np.allclose(self.mat_decomposition[iii]@self.mat_decomposition[iii+1], np.identity(self.matrix_size)):
-                self.del_list.append(iii)
+        for position in range(len(self.band_decomposition) - 1):
+            if np.allclose(self.mat_decomposition[position] @ self.mat_decomposition[position + 1],
+                           np.identity(self.matrix_size)):
+                self.del_list.append(position)
         return self.del_list
 
     def get_action_count(self):
@@ -683,8 +686,8 @@ class BandEnv(gym.Env):
         """
         self.bands_to_mat()
         mat=np.identity(self.matrix_size)
-        for jjj in range(len(self.band_decomposition)):
-            mat=mat@self.mat_decomposition[jjj]
+        for i in range(len(self.band_decomposition)):
+            mat=mat@self.mat_decomposition[i]
         return mat
 
     def info(self):
@@ -696,10 +699,10 @@ class BandEnv(gym.Env):
         return
 
     def algebraic_length(self):
-        alg_len=0
-        for iii in self.band_decomposition:
-            for jjj in iii:
-                alg_len+=np.sign(jjj)
+        alg_len = 0
+        for band in self.band_decomposition:
+            for crossing in band:
+                alg_len += np.sign(crossing)
         return alg_len
 
     def is_terminal(self):
