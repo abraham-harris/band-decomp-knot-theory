@@ -70,8 +70,8 @@ def _resolve_config(config, trainer, name=None):
                 or value < 0 or (key == "learning_rate" and value == 0)
                 or (key == "gamma" and value > 1)):
             raise ValueError(f"Invalid {key}: {value}")
-    if resolved["observation_type"] not in ("lk_matrix", "one_hot"):
-        raise ValueError("observation_type must be 'lk_matrix' or 'one_hot'")
+    if resolved["observation_type"] not in ("lk_matrix", "one_hot", "garside"):
+        raise ValueError("observation_type must be 'lk_matrix', 'one_hot', or 'garside'")
     return resolved
 
 

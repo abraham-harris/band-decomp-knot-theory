@@ -108,16 +108,26 @@ Both batch modes record the shortest decomposition seen at any step, including
 the starting one. Known rank is used for comparison, not as a stopping rule or
 proof of minimality. The supplied configs train 50 epochs per braid.
 
-Set `"observation_type": "lk_matrix"` (the default) or `"one_hot"` in a
-training config to compare policy inputs. Matrix observations contain one
-flattened Lawrence–Krammer matrix per band. One-hot observations contain up to
-13 ordered crossings per band, with `2 * (braid_index - 1)` possible signed
-crossings per slot. Both use `max_num_bands` band slots; longer decompositions
-cannot be encoded, and one-hot bands cannot exceed 13 crossings. Band
-cancellation uses the Lawrence–Krammer matrices in either mode. Use the same
-observation type when loading a saved policy for inference; the input dimensions
-differ. Run each setting as a separate experiment so the saved config records
-which was used.
+Set `"observation_type"` to `"lk_matrix"` (the default), `"one_hot"`, or
+`"garside"` in a training config to compare policy inputs. Matrix observations
+contain one flattened Lawrence–Krammer matrix per band. One-hot observations
+contain up to 13 ordered crossings per band, with `2 * (braid_index - 1)`
+possible signed crossings per slot. Garside observations contain each band's
+left normal form as a normalized Delta exponent and up to 13 simple-factor
+permutations. Each band slot also records whether the band exists and its
+original crossing count; an existing empty band therefore differs from a
+padded slot. Garside's per-band width is `3 + 13 * braid_index` values.
+
+All encodings use `max_num_bands` band slots. One-hot and Garside observations
+cannot encode a band longer than 13 crossings. Band cancellation continues to
+use Lawrence–Krammer matrices in every mode. Use the same observation type
+when loading a saved policy for inference; the input dimensions differ. Run
+each setting as a separate experiment so the saved config records which was
+used. `configs/batch_braids_garside.json` provides an independent batch run:
+
+```bash
+../.knotenv/bin/python batch_training.py --config configs/batch_braids_garside.json
+```
 
 ### Independent policies
 

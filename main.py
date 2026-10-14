@@ -776,8 +776,8 @@ def _resolve_experiment_config(config, name=None):
             resolved[key] = parameter.default
         else:
             raise ValueError(f"Missing required config field: {key}")
-    if resolved["observation_type"] not in ("lk_matrix", "one_hot"):
-        raise ValueError("observation_type must be 'lk_matrix' or 'one_hot'")
+    if resolved["observation_type"] not in ("lk_matrix", "one_hot", "garside"):
+        raise ValueError("observation_type must be 'lk_matrix', 'one_hot', or 'garside'")
     if mode != "inference":
         resolved["save_model"] = config.get("save_model", True)
         if type(resolved["save_model"]) is not bool:

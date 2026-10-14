@@ -1,15 +1,34 @@
+from functools import lru_cache
+
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from generator import RandomBraid
+from garside import left_normal_form
+
+
+@lru_cache(maxsize=8192)
+def _garside_band_features(braid_index, max_band_len, band):
+    """Cache encoded bands so unchanged bands need no repeat normalization."""
+    power, factors = left_normal_form(braid_index, band)
+    if len(factors) > max_band_len:
+        raise ValueError("band has too many Garside factors")
+    features = np.zeros(2 + max_band_len*braid_index, dtype=np.float32)
+    features[0] = len(band) / max_band_len
+    features[1] = power / max_band_len
+    if factors:
+        features[2:2 + len(factors)*braid_index] = (
+            np.asarray(factors, dtype=np.float32).ravel() / (braid_index - 1)
+        )
+    return features
 
 
 class BandEnv(gym.Env):
     def __init__(self, band_decomposition=[], braid_index=3, max_num_bands=16, timeout=200, train_type="random", difficulty=0, observation_type="lk_matrix"):
         super(BandEnv, self).__init__()
         self.max_band_len=13
-        if observation_type not in ("lk_matrix", "one_hot"):
-            raise ValueError("observation_type must be 'lk_matrix' or 'one_hot'")
+        if observation_type not in ("lk_matrix", "one_hot", "garside"):
+            raise ValueError("observation_type must be 'lk_matrix', 'one_hot', or 'garside'")
         self.observation_type = observation_type
         # Reserve four band slots for the two cancelling pairs, then split the remaining capacity between the two generated words
         curriculum_word_limit = (max_num_bands - 4) // 2
@@ -141,8 +160,12 @@ class BandEnv(gym.Env):
         self.mat_decomposition = self.bands_to_mat()
         self.matrix_output_size = self.max_num_bands*self.matrix_size*self.matrix_size
         self.one_hot_output_size = self.max_num_bands*self.max_band_len*len(self.possible_crossings)
-        self.output_size = (self.matrix_output_size if self.observation_type == "lk_matrix"
-                            else self.one_hot_output_size)
+        self.garside_output_size = self.max_num_bands*(3 + self.max_band_len*self.braid_index)
+        self.output_size = {
+            "lk_matrix": self.matrix_output_size,
+            "one_hot": self.one_hot_output_size,
+            "garside": self.garside_output_size,
+        }[self.observation_type]
         self.action_space = spaces.Discrete(self.max_num_actions)
         self.observation_space = spaces.Box(low=-max_num_bands, high=max_num_bands, shape=(self.get_state().size,))
         self.num_actions_taken = 0
@@ -573,6 +596,8 @@ class BandEnv(gym.Env):
         """Returns a vector of length self.output_size which represents the current band decomposition."""
         if self.observation_type == "one_hot":
             return self.get_state_ohe()
+        if self.observation_type == "garside":
+            return self.get_state_garside()
         return self.get_state_lk()
 
     def get_state_lk(self):
@@ -603,6 +628,21 @@ class BandEnv(gym.Env):
                 raise ValueError(f"band {band_index} exceeds max_band_len={self.max_band_len}")
             for crossing_index, crossing in enumerate(band):
                 state[band_index, crossing_index, crossing_indices[crossing]] = 1
+        return state.flatten()
+
+    def get_state_garside(self):
+        """Encode each band's left normal form in fixed-size band slots."""
+        if len(self.band_decomposition) > self.max_num_bands:
+            raise ValueError("band decomposition exceeds max_num_bands observation capacity")
+        width = 3 + self.max_band_len*self.braid_index
+        state = np.zeros((self.max_num_bands, width), dtype=np.float32)
+        for band_index, band in enumerate(self.band_decomposition):
+            if len(band) > self.max_band_len:
+                raise ValueError(f"band {band_index} exceeds max_band_len={self.max_band_len}")
+            state[band_index, 0] = 1
+            state[band_index, 1:] = _garside_band_features(
+                self.braid_index, self.max_band_len, tuple(band)
+            )
         return state.flatten()
 
     def map_action(self,number):
