@@ -23,7 +23,7 @@ from experiment_utils import initialize_run, load_config, update_run_status
 
 RESULT_FIELDS = (
     "braid_id", "braid_index", "true_rank", "initial_length", "best_length",
-    "rank_gap", "seed", "epochs_completed", "episodes_completed",
+    "rank_gap", "seed", "passes_completed", "epochs_completed", "episodes_completed",
     "elapsed_seconds", "best_decomposition", "best_action_sequence", "best_found_at",
 )
 TRAINING_FIELDS = (
@@ -33,7 +33,10 @@ TRAINING_FIELDS = (
 
 
 def _resolve_config(config, trainer, name=None):
-    allowed = set(TRAINING_FIELDS) | {"name", "mode", "seed", "data_path", "iterative", "braid_index"}
+    allowed = set(TRAINING_FIELDS) | {
+        "name", "mode", "seed", "data_path", "iterative", "braid_index",
+        "dataset_passes",
+    }
     unknown = set(config) - allowed
     if unknown:
         raise ValueError(f"Unknown config fields: {', '.join(sorted(unknown))}")
@@ -41,12 +44,17 @@ def _resolve_config(config, trainer, name=None):
         raise ValueError("mode must be 'batch_specific_training'")
     iterative = config.get("iterative", False)
     braid_index = config.get("braid_index")
+    dataset_passes = config.get("dataset_passes", 1)
     if type(iterative) is not bool:
         raise ValueError("iterative must be a boolean")
     if iterative and (type(braid_index) is not int or braid_index < 2):
         raise ValueError("iterative training requires braid_index >= 2 as an upper limit")
     if not iterative and braid_index is not None:
         raise ValueError("braid_index requires iterative=true")
+    if type(dataset_passes) is not int or dataset_passes < 1:
+        raise ValueError("dataset_passes must be a positive integer")
+    if not iterative and dataset_passes != 1:
+        raise ValueError("dataset_passes requires iterative=true")
     parameters = inspect.signature(trainer).parameters
     resolved = {
         "name": name if name is not None else config.get("name", "batch_braids"),
@@ -55,6 +63,7 @@ def _resolve_config(config, trainer, name=None):
         "seed": config.get("seed"),
         "iterative": iterative,
         "braid_index": braid_index,
+        "dataset_passes": dataset_passes,
         **{key: config.get(key, parameters[key].default) for key in TRAINING_FIELDS},
     }
     seed = resolved["seed"]
@@ -132,9 +141,12 @@ def _load_results(path, braids):
         return []
     with path.open(encoding="utf-8", newline="") as source:
         reader = csv.DictReader(source)
-        if reader.fieldnames != list(RESULT_FIELDS):
+        legacy_fields = [field for field in RESULT_FIELDS if field != "passes_completed"]
+        if reader.fieldnames not in (list(RESULT_FIELDS), legacy_fields):
             raise ValueError("Saved results.csv has unexpected columns")
         rows = list(reader)
+    for row in rows:
+        row.setdefault("passes_completed", "1")
     seen = set()
     for row in rows:
         braid_id = int(row["braid_id"])
@@ -234,7 +246,8 @@ def run_batch_experiment(config_path=None, *, resume=None, name=None, runs_root=
         resolved = _resolve_config({key: value for key, value in config.items()
                                     if key not in {"dataset_sha256", "num_braids"}},
                                    ppo_single_braid)
-        config.update(iterative=resolved["iterative"], braid_index=resolved["braid_index"])
+        config.update(iterative=resolved["iterative"], braid_index=resolved["braid_index"],
+                      dataset_passes=resolved["dataset_passes"])
         braids = _load_braids(dataset_bytes, config["max_num_bands"])
         rows = _load_results(run_directory / "results.csv", braids)
     else:
@@ -264,47 +277,71 @@ def run_batch_experiment(config_path=None, *, resume=None, name=None, runs_root=
                             if config["iterative"] else "a fresh policy per braid")
     print(f"Completed: {len(completed)}/{len(braids)}; {training_description}.",
           flush=True)
+    if config["iterative"]:
+        print(f"Dataset passes: {config['dataset_passes']}.", flush=True)
     update_run_status(run_directory, "running")
     kwargs = {key: config[key] for key in TRAINING_FIELDS}
+    seed_stride = max(braid["braid_id"] for braid in braids) + 1
     try:
-        for braid in braids:
-            braid_id = braid["braid_id"]
-            if braid_id in completed:
-                continue
-            seed = None if config["seed"] is None else (config["seed"] + braid_id) % 2**32
-            if seed is not None:
-                random.seed(seed)
-                np.random.seed(seed)
-                torch.manual_seed(seed)
-            print(f"Training braid {braid_id} ({len(rows) + 1}/{len(braids)}): "
-                  f"{braid['braid_index']} strands, initial length {len(braid['word'])}", flush=True)
-            start = time.monotonic()
-            training_result = ppo_single_braid(
-                band_decomposition=braid["word"], braid_index=braid["braid_index"],
-                save_path=None, report_path=None, collect_logs=False, show_progress=False,
-                training_state=training_states.get(braid["braid_index"]),
-                return_training_state=config["iterative"],
-                **kwargs,
-            )
-            report = training_result[4]
-            row = {
-                "braid_id": braid_id, "braid_index": braid["braid_index"],
-                "true_rank": braid["true_rank"], "initial_length": report["initial_length"],
-                "best_length": report["best_length"],
-                "rank_gap": report["best_length"] - braid["true_rank"], "seed": seed,
-                "epochs_completed": config["epochs"],
-                "episodes_completed": config["epochs"] * config["env_samples"],
-                "elapsed_seconds": round(time.monotonic() - start, 3),
-                **{key: json.dumps(report[key]) for key in
-                   ("best_decomposition", "best_action_sequence", "best_found_at")},
-            }
-            if config["iterative"]:
-                training_states[braid["braid_index"]] = training_result[5]
-            rows.append(row)
-            _save_results(rows, run_directory / "results.csv")
-            print(f"Saved braid {braid_id}: best length {row['best_length']}, "
-                  f"known rank {row['true_rank']} ({len(rows)}/{len(braids)} completed)", flush=True)
-            del training_result, report
+        passes = config["dataset_passes"] if config["iterative"] else 1
+        for pass_index in range(passes):
+            for braid_position, braid in enumerate(braids, start=1):
+                braid_id = braid["braid_id"]
+                if braid_id in completed:
+                    continue
+                seed = (None if config["seed"] is None else
+                        (config["seed"] + pass_index * seed_stride + braid_id) % 2**32)
+                if seed is not None:
+                    random.seed(seed)
+                    np.random.seed(seed)
+                    torch.manual_seed(seed)
+                print(f"Training braid {braid_id} (pass {pass_index + 1}/{passes}, "
+                      f"{braid_position}/{len(braids)}): {braid['braid_index']} strands, "
+                      f"initial length {len(braid['word'])}", flush=True)
+                start = time.monotonic()
+                training_result = ppo_single_braid(
+                    band_decomposition=braid["word"], braid_index=braid["braid_index"],
+                    save_path=None, report_path=None, collect_logs=False, show_progress=False,
+                    training_state=training_states.get(braid["braid_index"]),
+                    return_training_state=config["iterative"],
+                    **kwargs,
+                )
+                report = training_result[4]
+                existing = next((item for item in rows if int(item["braid_id"]) == braid_id), None)
+                best_report = report
+                if existing is not None and int(existing["best_length"]) <= report["best_length"]:
+                    best_report = {
+                        "best_length": int(existing["best_length"]),
+                        "best_decomposition": json.loads(existing["best_decomposition"]),
+                        "best_action_sequence": json.loads(existing["best_action_sequence"]),
+                        "best_found_at": json.loads(existing["best_found_at"]),
+                    }
+                row = {
+                    "braid_id": braid_id, "braid_index": braid["braid_index"],
+                    "true_rank": braid["true_rank"], "initial_length": report["initial_length"],
+                    "best_length": best_report["best_length"],
+                    "rank_gap": best_report["best_length"] - braid["true_rank"],
+                    "seed": seed if existing is None else existing["seed"],
+                    "passes_completed": 1 if existing is None else int(existing["passes_completed"]) + 1,
+                    "epochs_completed": config["epochs"] if existing is None else
+                        int(existing["epochs_completed"]) + config["epochs"],
+                    "episodes_completed": config["epochs"] * config["env_samples"] if existing is None else
+                        int(existing["episodes_completed"]) + config["epochs"] * config["env_samples"],
+                    "elapsed_seconds": round((0 if existing is None else
+                        float(existing["elapsed_seconds"])) + time.monotonic() - start, 3),
+                    **{key: json.dumps(best_report[key]) for key in
+                       ("best_decomposition", "best_action_sequence", "best_found_at")},
+                }
+                if config["iterative"]:
+                    training_states[braid["braid_index"]] = training_result[5]
+                if existing is None:
+                    rows.append(row)
+                else:
+                    rows[rows.index(existing)] = row
+                _save_results(rows, run_directory / "results.csv")
+                print(f"Saved braid {braid_id}: best length {row['best_length']}, "
+                      f"known rank {row['true_rank']} (pass {pass_index + 1}/{passes})", flush=True)
+                del training_result, report
         if config["iterative"]:
             for braid_index, state in sorted(training_states.items()):
                 _save_policy_model(state["policy"],

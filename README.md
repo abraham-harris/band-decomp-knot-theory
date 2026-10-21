@@ -98,9 +98,9 @@ that file. Use `save_model: false` to skip it. Batch runs use the rules below.
 ### Seeds
 
 `"seed": null` leaves a run unseeded. An integer from `0` through `4294967295`
-seeds Python, NumPy, and PyTorch. Batch runs use `(seed + braid_id) % 2**32`
-for each braid. Exact reproducibility also depends on hardware and library
-versions.
+seeds Python, NumPy, and PyTorch. Batch runs derive a seed from the braid ID;
+iterative runs also vary it by dataset pass. Exact reproducibility also depends
+on hardware and library versions.
 
 ## Batch training
 
@@ -155,8 +155,10 @@ saved run directory; the braid in progress restarts from scratch:
 ### Iterative policies
 
 Set `"iterative": true` and `"braid_index"` to train all dataset braids with
-up to that many strands. The sample config includes all 100 braids up to index
-8:
+up to that many strands. Set `"dataset_passes"` to a positive integer to visit
+the selected set that many times; it defaults to `1`. For example, set it to
+`2` to make two full passes. The sample config includes all 100 braids up to
+index 8:
 
 ```bash
 ../.knotenv/bin/python batch_training.py --config configs/batch_braids_iterative.json
@@ -165,9 +167,11 @@ up to that many strands. The sample config includes all 100 braids up to index
 Braids train from smallest known rank to largest, breaking ties by starting
 length and then CSV row. Each strand count keeps its own policy and optimizer
 in memory; training continues when another braid with that strand count appears.
-Only after the full run ends does it save one final policy per strand count,
-for example `models/braid_index_4.pt`. It writes no training checkpoints, so
-an interrupted iterative run cannot resume, though its completed CSV rows remain.
+Each pass follows the same braid order. `results.csv` keeps one row per braid,
+with cumulative training counts and the best decomposition found across visits.
+Only after the full run ends does it save one final policy per strand count, for
+example `models/braid_index_4.pt`. It writes no training checkpoints, so an
+interrupted iterative run cannot resume, though its completed result rows remain.
 
 ### Plots and inference
 
