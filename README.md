@@ -180,8 +180,10 @@ Plot completed batch results at any time:
 Batch and inference plots show smallest known rank first, then shortest
 starting decomposition. To evaluate a saved policy, set `model_path` in
 `configs/inference.json`, with the `braid_index` and `max_num_bands` used to
-train it. `data_path` selects the evaluation dataset. Inference reads the model
-and writes its own run directory.
+train it. The configured `braid_index` is also the maximum dataset braid index
+included: lower-index braids are evaluated in the model's configured strand
+space, and higher-index rows are skipped. `data_path` selects the evaluation
+dataset. Inference reads the model and writes its own run directory.
 
 On the supercomputer, use its Python environment. Copy the entire run directory
 when transferring results or resuming an independent batch run.

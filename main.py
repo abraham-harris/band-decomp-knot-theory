@@ -608,8 +608,20 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
                   plot_path="./results/inference.png", *,
                   braid_index=8, max_num_bands=80, max_actions=150,
                   observation_type="lk_matrix"):
-    """Evaluate a saved policy on all braids in the inference dataset."""
+    """Evaluate a saved policy on braids up to the model's strand count."""
     braid_df = pd.read_csv(data_path)
+    required_columns = {"Braid index", "Braid ranks", "Braid word"}
+    missing_columns = required_columns - set(braid_df.columns)
+    if missing_columns:
+        raise ValueError(
+            f"Inference dataset is missing columns: {', '.join(sorted(missing_columns))}"
+        )
+    braid_df["Braid index"] = pd.to_numeric(braid_df["Braid index"], errors="raise")
+    braid_df = braid_df[braid_df["Braid index"] <= braid_index].reset_index(drop=True)
+    if braid_df.empty:
+        raise ValueError(
+            f"Inference dataset contains no braids with Braid index <= {braid_index}"
+        )
     true_ranks = braid_df["Braid ranks"].values
     braid_words = braid_df["Braid word"]
 
@@ -629,7 +641,7 @@ def run_inference(model_path="./models/Braid_Simplificationator_2000",
     Path(forms_path).parent.mkdir(parents=True, exist_ok=True)
     Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
 
-    print("Inference...")
+    print(f"Inference on {len(braid_df)} braids with Braid index <= {braid_index}...")
     final_decomp_lens = []
     best_decomp_lens = []
     simplest_forms = []
