@@ -1,0 +1,9 @@
+{
+  "name": "crossing_removal_test_set",
+  "mode": "inference",
+  "seed": 0,
+  "model_path": "runs/REPLACE_WITH_RANDOM_RUN/model.pt",
+  "data_path": "data/braids_with_ranks.csv",
+  "max_actions": 150,
+  "attempts": 10
+}

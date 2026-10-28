@@ -1,0 +1,17 @@
+{
+  "name": "crossing_removal_random_8",
+  "mode": "train_random",
+  "seed": 0,
+  "braid_index": 8,
+  "max_word_length": 80,
+  "max_actions": 150,
+  "random_length_stdev": 24,
+  "epochs": 50,
+  "env_samples": 10,
+  "batch_size": 256,
+  "policy_epochs": 5,
+  "learning_rate": 0.0003,
+  "gamma": 0.99,
+  "clip_epsilon": 0.2,
+  "entropy_coefficient": 0.01
+}

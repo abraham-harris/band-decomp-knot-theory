@@ -191,3 +191,43 @@ dataset. Inference reads the model and writes its own run directory.
 
 On the supercomputer, use its Python environment. Copy the entire run directory
 when transferring results or resuming an independent batch run.
+
+## Crossing-removal method
+
+`crossing_removal_method.py` trains a separate PPO policy on braid words. It
+can apply signed Artin relations, commute distant generators, cancel or insert
+adjacent inverse pairs, and delete one crossing. It does not store band
+decompositions. If `D` crossings have been deleted and the remaining word has
+`L` crossings, deleting the rest always gives a band decomposition of length
+`D + L`. Each episode saves the best such point and completes it by deleting
+the remaining crossings. Rewards are given when this guaranteed length reaches
+a new low.
+
+Run from the repository root with the existing Python environment:
+
+```bash
+../.knotenv/bin/python crossing_removal_method.py --config configs/crossing_removal_fixed.json
+../.knotenv/bin/python crossing_removal_method.py --config configs/crossing_removal_random.json
+../.knotenv/bin/python crossing_removal_method.py --config configs/crossing_removal_each.json
+```
+
+The fixed config is a small three-strand smoke experiment. The random config
+uses eight strands and a word capacity of 80, so its checkpoint can evaluate
+the full 100-braid test set (which reaches eight strands and 59 crossings).
+For inference, set `model_path` in `configs/crossing_removal_inference.json` to
+the random run's `model.pt`, then run:
+
+```bash
+../.knotenv/bin/python crossing_removal_method.py --config configs/crossing_removal_inference.json
+```
+
+Each command creates a new timestamped directory under `runs/`. Fixed and
+random training save `model.pt`, `results.json`, and `metrics.csv`. Training a
+fresh policy for each test braid saves `results.csv`, `summary.json`, a dataset
+snapshot, and a plot. Resume an interrupted per-braid run with
+`--resume runs/<run_directory>`; completed rows are skipped. Inference saves
+per-braid deletion counts, action traces, and their comparison with known ranks
+to `results.csv`, plus `summary.json` and a plot. Inference evaluates braids that
+fit the checkpoint's strand count and word capacity; the summary reports how
+many were evaluated. Inference restricts inserted generators to each braid's
+actual strand count. The `device` setting accepts `cpu`, `cuda`, or `auto`.
