@@ -343,19 +343,21 @@ def _plot(rows, path):
     if not rows:
         return
     import matplotlib.pyplot as plt
-    ordered = sorted(rows, key=lambda row: (int(row["true_rank"]), int(row["initial_length"])))
-    x = np.arange(len(ordered))
-    figure, axis = plt.subplots(figsize=(11, 4))
+    comparison = sorted(
+        (int(row["true_rank"]), int(row["initial_length"]), int(row["best_length"]))
+        for row in rows
+    )
+    sorted_optimal, sorted_initial, sorted_best = zip(*comparison)
+    x_vals = np.arange(1, len(comparison) + 1)
+    figure, axis = plt.subplots(figsize=(13, 4))
     try:
-        for key, label in (("true_rank", "Known rank"),
-                           ("initial_length", "Initial length"),
-                           ("best_length", "Crossings removed")):
-            axis.scatter(x, [int(row[key]) for row in ordered], label=label, s=16)
-        axis.set_xlabel("Test braid, sorted by known rank")
-        axis.set_ylabel("Band decomposition length")
+        axis.scatter(x_vals, sorted_optimal, label="True Rank")
+        axis.scatter(x_vals, sorted_initial, color="green", label="Initial Band Decomp Length")
+        axis.scatter(x_vals, sorted_best, marker="+", label="Best Band Decomp Length Achieved")
+        axis.set_ylabel("Band Decomposition Length")
+        axis.set_xlabel("Test Braid Identifier")
         axis.legend()
         axis.grid()
-        figure.tight_layout()
         figure.savefig(path)
     finally:
         plt.close(figure)
