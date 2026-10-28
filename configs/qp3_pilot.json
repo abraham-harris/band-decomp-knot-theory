@@ -1,0 +1,11 @@
+{
+  "name": "qp3_witness_pilot",
+  "model_path": "runs/20261014_193218_109991Z_standard_3_lk_2000_epochs/Braid_Simplificationator_2000",
+  "generation_seed": 20261020,
+  "policy_seed": 1729,
+  "cases": 60,
+  "max_word_length": 24,
+  "max_num_bands": 30,
+  "attempts": 10,
+  "max_actions": 150
+}

@@ -192,6 +192,29 @@ dataset. Inference reads the model and writes its own run directory.
 On the supercomputer, use its Python environment. Copy the entire run directory
 when transferring results or resuming an independent batch run.
 
+### Three-braid quasipositivity witness pilot
+
+`qp3_pilot.py` tests the three-strand checkpoint configured in
+`configs/qp3_pilot.json` on 60 known-quasipositive braids.
+
+```bash
+../.knotenv/bin/python qp3_pilot.py --config configs/qp3_pilot.json
+```
+
+The command creates a new directory under `runs/`. Open `results.csv` to see
+each input word, its known positive-band decomposition, any decomposition found
+by the model, and search time or budget exhaustion. `model_summary.json` includes
+the median time for successful searches. Use `--generate-only` to prepare cases
+without running the model; `cases_review.csv` lists their words and known
+decompositions.
+
+For the comparison, upload the run's `qp3_input.json` and
+[Orevkov's `qp3.m`](https://www.math.univ-toulouse.fr/~orevkov/qp3.m) to
+WolframCloud, then evaluate [`wolfram/qp3_cloud.wl`](wolfram/qp3_cloud.wl) in a
+notebook. Its results appear there. Cloud and local times are exploratory;
+`qp3` decides quasipositivity, while the model can only find a witness or use up
+its action budget.
+
 ## Crossing-removal method
 
 `crossing_removal_method.py` trains a separate PPO policy on braid words. It
