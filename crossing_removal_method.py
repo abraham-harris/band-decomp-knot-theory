@@ -252,8 +252,9 @@ def train_policy(config, *, word=None, braid_index=None, random_mode=False):
             memory = []
             lengths = []
             improvements = []
+            returns = []
             for _ in range(config["env_samples"]):
-                result, transitions, _ = _episode(env, model, device, training=True)
+                result, transitions, episode_return = _episode(env, model, device, training=True)
                 running_return = 0.0
                 episode_returns = []
                 for transition in reversed(transitions):
@@ -263,6 +264,7 @@ def train_policy(config, *, word=None, braid_index=None, random_mode=False):
                               zip(transitions, reversed(episode_returns)))
                 lengths.append(result["best_length"])
                 improvements.append(result["initial_length"] - result["best_length"])
+                returns.append(episode_return)
                 if best is None or _score(result, random_mode) > _score(best, random_mode):
                     best = result
             if not memory:
@@ -271,6 +273,7 @@ def train_policy(config, *, word=None, braid_index=None, random_mode=False):
             metrics.append({
                 "epoch": epoch, "mean_best_length": float(np.mean(lengths)),
                 "mean_improvement": float(np.mean(improvements)),
+                "mean_return": float(np.mean(returns)),
                 "policy_loss": policy_loss, "value_loss": value_loss,
             })
             if (epoch + 1) % max(1, config["epochs"] // 10) == 0 or epoch + 1 == config["epochs"]:
@@ -358,6 +361,23 @@ def _plot(rows, path):
         plt.close(figure)
 
 
+def _plot_training_metrics(metrics, name, path):
+    """Plot the mean episode return recorded for each training epoch."""
+    import matplotlib.pyplot as plt
+    figure, axis = plt.subplots(figsize=(10, 4))
+    try:
+        axis.plot([row["epoch"] for row in metrics],
+                  [row["mean_return"] for row in metrics])
+        axis.set_xlabel("Epoch (zero-based)")
+        axis.set_ylabel("Mean return")
+        axis.set_title(name)
+        axis.grid()
+        figure.tight_layout()
+        figure.savefig(path)
+    finally:
+        plt.close(figure)
+
+
 def _run_single(config, run_directory):
     random_mode = config["mode"] == "train_random"
     model, best, metrics = train_policy(
@@ -369,6 +389,7 @@ def _run_single(config, run_directory):
         "best_example": best, "final_epoch": metrics[-1], "model_file": "model.pt",
     })
     save_metrics(metrics, run_directory / "metrics.csv")
+    _plot_training_metrics(metrics, config["name"], run_directory / "plot.png")
 
 
 def _run_each(config, run_directory, *, resume=False):

@@ -245,8 +245,10 @@ the random run's `model.pt`, then run:
 ```
 
 Each command creates a new timestamped directory under `runs/`. Fixed and
-random training save `model.pt`, `results.json`, and `metrics.csv`. Training a
-fresh policy for each test braid saves `results.csv`, `summary.json`, a dataset
+random training save `model.pt`, `results.json`, `metrics.csv`, and `plot.png`.
+The plot shows mean episode return by epoch; return is the improvement in
+guaranteed deletion count divided by the initial word length. Training a fresh
+policy for each test braid saves `results.csv`, `summary.json`, a dataset
 snapshot, and a plot. Resume an interrupted per-braid run with
 `--resume runs/<run_directory>`; completed rows are skipped. Inference saves
 per-braid deletion counts, action traces, and their comparison with known ranks
