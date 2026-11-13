@@ -256,3 +256,58 @@ to `results.csv`, plus `summary.json` and a plot. Inference evaluates braids tha
 fit the checkpoint's strand count and word capacity; the summary reports how
 many were evaluated. Inference restricts inserted generators to each braid's
 actual strand count. The `device` setting accepts `cpu`, `cuda`, or `auto`.
+
+## Dynamic-programming comparison
+
+`dp_braid.py` implements the braid-rank **upper-bound** recurrence from
+[Meiners's thesis](https://scholarsarchive.byu.edu/etd/8947/). It uses exact
+Garside normal forms for braid identity checks and reconstructs a certified
+band decomposition. Its `decomposition` is a list of lists of signed Artin
+generators, in the same product order as `BandEnv.band_decomposition`. An empty
+list represents an identity braid with zero bands. The DP can produce bands
+longer than `BandEnv`'s 13-crossing limit; the comparison records that length.
+
+The 100-epoch batch run from September 30 has 99 of 100 braids. The missing
+row is braid ID 99. To reproduce it with the closest identifiable historical
+source (`47ac89b`), resume a **copy** of that run. These commands are one-time
+setup and leave the original run untouched:
+
+```bash
+mkdir -p /tmp/band_dp_historical_47ac89b
+git archive 47ac89b | tar -x -C /tmp/band_dp_historical_47ac89b
+cp -a runs/20260930_180018_777237Z_batch_braids_100_epochs runs/dp_rl_historical_completion_47ac89b
+../.knotenv/bin/python /tmp/band_dp_historical_47ac89b/batch_training.py --resume runs/dp_rl_historical_completion_47ac89b
+```
+
+The source revision of the original run was not recorded, so this reproduction
+is labeled with the inferred commit. Run the comparison with the completed
+copy; repeating the command resumes after the last saved braid:
+
+If local training is too slow, copy the whole
+`runs/dp_rl_historical_completion_47ac89b` directory to the supercomputer.
+It contains `historical_source_47ac89b.tar`, so no updated project source files
+are needed there for this one-braid training step. From the remote project root,
+using its existing Python environment, run:
+
+```bash
+mkdir -p /tmp/band_dp_historical_47ac89b
+tar -xf runs/dp_rl_historical_completion_47ac89b/historical_source_47ac89b.tar -C /tmp/band_dp_historical_47ac89b
+python -c 'import sys, torch, numpy, gymnasium, pandas, matplotlib, IPython, tqdm; print(sys.version); print("torch", torch.__version__, "numpy", numpy.__version__)'
+python /tmp/band_dp_historical_47ac89b/batch_training.py --resume runs/dp_rl_historical_completion_47ac89b
+```
+
+The last command should report 99 completed braids before training ID 99.
+Copy the completed run directory back before running the DP comparison locally.
+
+```bash
+../.knotenv/bin/python compare_dp_rl.py --rl-run runs/dp_rl_historical_completion_47ac89b
+```
+
+The script writes `runs/dp_rl_comparison_100_epochs/results.csv`,
+`summary.json`, `report.md`, and `config.json`. For each braid, it runs DP on the original
+word and on the flattened best RL decomposition. Both DP witnesses are stored
+as JSON lists of lists. `hybrid_best_length` is the better of RL and DP after
+RL; `best_of_all_length` also considers DP on the original word. Timeouts and
+errors are explicit. Use `--retry-failed --timeout-seconds 300` to retry those
+cases. Compare solution lengths across methods; saved RL and new DP runtimes
+may come from different machines.
