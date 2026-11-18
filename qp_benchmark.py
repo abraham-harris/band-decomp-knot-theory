@@ -398,15 +398,30 @@ def summarize(run_dir, data_dir=DEFAULT_DATA_DIR):
                "usable_braid_count": len(cases),
                "excluded_count": manifest["excluded_count"],
                "dp_completed": len(dp), "rl_completed": len(rl)}
-    for stage, rows in (("dp", dp), ("rl", rl),
-                        ("dp_after_rl", {name: r["dp_after_rl"] for name, r in rl.items()
-                                         if "dp_after_rl" in r})):
+    for stage, rows in (("dp", dp), ("rl", rl)):
         statuses = {}
         for row in rows.values():
             status = row["status"]
             statuses[status] = statuses.get(status, 0) + 1
         summary[stage + "_statuses"] = statuses
     witness_statuses = {"positive", "negative", "identity"}
+    post_rl_rows = {name: row for name, row in rl.items() if "dp_after_rl" in row}
+    raw_post_statuses = {}
+    attributed_post_statuses = {}
+    dp_confirmed_rl = 0
+    for row in post_rl_rows.values():
+        dp_status = row["dp_after_rl"]["status"]
+        raw_post_statuses[dp_status] = raw_post_statuses.get(dp_status, 0) + 1
+        rl_found = row.get("witness_sign") in witness_statuses
+        dp_found = dp_status in witness_statuses
+        dp_confirmed_rl += rl_found and dp_found
+        attributed_status = ("resolved_by_rl" if rl_found else
+                             "resolved_by_dp_after_rl" if dp_found else dp_status)
+        attributed_post_statuses[attributed_status] = (
+            attributed_post_statuses.get(attributed_status, 0) + 1)
+    summary["dp_after_rl_statuses"] = attributed_post_statuses
+    summary["dp_after_rl_raw_statuses"] = raw_post_statuses
+    summary["dp_confirmed_rl_witnesses"] = dp_confirmed_rl
     dp_witnesses = sum(row["status"] in witness_statuses for row in dp.values())
     hybrid_new = sum(
         dp.get(name, {}).get("status") not in witness_statuses and (
