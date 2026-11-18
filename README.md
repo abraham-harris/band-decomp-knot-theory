@@ -257,6 +257,26 @@ fit the checkpoint's strand count and word capacity; the summary reports how
 many were evaluated. Inference restricts inserted generators to each braid's
 actual strand count. The `device` setting accepts `cpu`, `cuda`, or `auto`.
 
+## KnotInfo quasipositivity benchmark
+
+`qp_benchmark.py` downloads KnotInfo data, keeps knots labeled quasipositive,
+and tests their listed braid words. It records positive and negative witnesses
+separately; unresolved cases are not proofs of nonquasipositivity.
+
+```bash
+python -m pip install -r requirements-knotinfo.txt
+python qp_benchmark.py prepare
+python qp_benchmark.py dp
+python qp_benchmark.py rl --run-dir runs/<run_directory>
+python qp_benchmark.py summary --run-dir runs/<run_directory>
+```
+
+Preparation writes the cleaned corpus to `data/knotinfo/`. DP creates a new
+directory under `runs/` and prints its path. RL requires the completed DP run;
+by default it tries ten unresolved braids and then applies DP to its best
+simplifications. Results and summaries stay in the run directory. Repeat `dp`
+with `--run-dir` or repeat `rl` with the same arguments to resume.
+
 ## Dynamic-programming comparison
 
 `dp_braid.py` implements the braid-rank **upper-bound** recurrence from
