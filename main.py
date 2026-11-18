@@ -455,12 +455,17 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
                      epsilon=0.16273153856100495, policy_epochs=5,
                      collect_logs=True, show_progress=True,
                      training_state=None, return_training_state=False,
-                     observation_type="lk_matrix"):
+                     observation_type="lk_matrix", candidate_validator=None):
     """Train PPO on one fixed braid and retain the best path found.
 
     Set collect_logs=False to skip retaining epoch environment logs, and
     show_progress=False for quiet batch training. Neither changes the best-path
     tracking or the returned report.
+
+    candidate_validator is an optional function taking the current list of
+    bands. A newly shorter decomposition replaces the saved best only when it
+    returns True. The KnotInfo benchmark uses it to check exact braid equality
+    after the environment's approximate cancellation test.
     """
     if band_decomposition is None:
         raise ValueError("band_decomposition must be set for specific-braid training")
@@ -532,7 +537,9 @@ def ppo_single_braid(band_decomposition, braid_index, epochs=5000,
                 num_actions_taken += 1
 
                 current_decomp_len = len(env.unwrapped.band_decomposition)
-                if current_decomp_len < best_decomp_len:
+                if (current_decomp_len < best_decomp_len and
+                        (candidate_validator is None or candidate_validator(
+                            env.unwrapped.band_decomposition))):
                     best_decomp_len = current_decomp_len
                     best_decomposition = copy.deepcopy(env.unwrapped.band_decomposition)
                     best_action_sequence = episode_actions.copy()

@@ -8,3 +8,4 @@ AGENTS.md
 /logs/
 /results/
 /scratch/
+/data/knotinfo/*.zip
