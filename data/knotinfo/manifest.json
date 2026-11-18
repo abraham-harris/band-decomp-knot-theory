@@ -1,0 +1,13 @@
+{
+  "cases_sha256": "c793a862d95915be1b9d097cf04ec2128201013c7bcc5d0ffd011c28e6550979",
+  "database_qp_no": 2514,
+  "database_qp_unlabeled": 9989,
+  "database_qp_yes": 463,
+  "database_rows": 12966,
+  "excluded_count": 0,
+  "labeled_count": 463,
+  "prepared_at_utc": "2026-11-18T16:16:14.563796+00:00",
+  "source_sha256": "f6abd30a3b8706c175db7ac47d4ce20be231a8c0f068e6bd3ebd203e00880ae8",
+  "source_url": "https://raw.githubusercontent.com/knotinfo-org/assets/main/knotinfo_data_complete.xls.zip",
+  "usable_count": 463
+}
